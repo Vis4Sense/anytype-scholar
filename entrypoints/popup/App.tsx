@@ -25,6 +25,10 @@ const buttonClass =
   'mt-5 w-full rounded-xl border border-zinc-950 bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-70';
 const inlineButtonClass =
   'rounded-lg border border-zinc-300 px-2.5 py-1.5 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-70';
+const compactInlineButtonClass =
+  'rounded-lg border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-70';
+const compactSelectClass =
+  'w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-950 outline-none transition focus:border-zinc-950';
 
 function App() {
   const [settings, setSettings] = useState<AnytypeConnectionSettings>(
@@ -39,11 +43,18 @@ function App() {
   const [selectedTypeDetail, setSelectedTypeDetail] = useState<AnytypeTypeDetail | null>(
     null,
   );
+  const [selectedTypeDetailTypeId, setSelectedTypeDetailTypeId] = useState('');
+  const [selectedTypeDetailLoading, setSelectedTypeDetailLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('Checking local Anytype connection...');
   const [busyLabel, setBusyLabel] = useState('');
   const [isCreatingType, setIsCreatingType] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
   const [typeActionMessage, setTypeActionMessage] = useState<{
+    kind: 'error' | 'success';
+    text: string;
+  } | null>(null);
+  const [schemaExpanded, setSchemaExpanded] = useState(false);
+  const [schemaActionMessage, setSchemaActionMessage] = useState<{
     kind: 'error' | 'success';
     text: string;
   } | null>(null);
@@ -249,6 +260,8 @@ function App() {
     setIsCreatingType(false);
     setNewTypeName('');
     setTypeActionMessage(null);
+    setSchemaExpanded(false);
+    setSchemaActionMessage(null);
     await saveConnectionSettings(nextSettings);
     await refreshSchema(nextSettings);
     setStatusMessage('Connected to Anytype.');
@@ -265,6 +278,8 @@ function App() {
     setIsCreatingType(false);
     setNewTypeName('');
     setTypeActionMessage(null);
+    setSchemaExpanded(false);
+    setSchemaActionMessage(null);
     await saveConnectionSettings(nextSettings);
     await refreshSelectedType(nextSettings, targetTypeId);
   }
@@ -315,11 +330,84 @@ function App() {
     setIsCreatingType(false);
     setNewTypeName('');
     await saveConnectionSettings(nextSettings);
+    setBusyLabel('Preparing schema...');
+
+    const schemaResult = (await browser.runtime.sendMessage({
+      type: 'anytype:prepare-paper-type',
+      payload: {
+        settings: nextSettings,
+        typeId: result.type.id,
+        typeName: result.type.name,
+      },
+    })) as {
+      ok: boolean;
+      message: string;
+      type?: AnytypeTypeDetail;
+      status?: number;
+      statusText?: string;
+    };
+
+    if (schemaResult.ok) {
+      setSelectedTypeDetail(schemaResult.type ?? null);
+      setTypeActionMessage({
+        kind: 'success',
+        text: `${result.type.name} is ready.`,
+      });
+      setSchemaActionMessage(null);
+    } else {
+      setTypeActionMessage({
+        kind: 'success',
+        text: `${result.type.name} was created.`,
+      });
+      setSchemaActionMessage({
+        kind: 'error',
+        text: formatMessage(schemaResult.message, schemaResult.status, schemaResult.statusText),
+      });
+    }
+
     await refreshSchema(nextSettings);
-    await refreshSelectedType(nextSettings, result.type.id);
-    setTypeActionMessage({
+    setSchemaExpanded(false);
+    setBusyLabel('');
+  }
+
+  async function handleApproveSchemaUpdate() {
+    if (!settings.targetTypeId || !selectedType) {
+      return;
+    }
+
+    setBusyLabel('Updating schema...');
+    setSchemaActionMessage(null);
+
+    const result = (await browser.runtime.sendMessage({
+      type: 'anytype:prepare-paper-type',
+      payload: {
+        settings,
+        typeId: settings.targetTypeId,
+        typeName: selectedType.name,
+      },
+    })) as {
+      ok: boolean;
+      message: string;
+      type?: AnytypeTypeDetail;
+      status?: number;
+      statusText?: string;
+    };
+
+    if (!result.ok) {
+      setSchemaActionMessage({
+        kind: 'error',
+        text: formatMessage(result.message, result.status, result.statusText),
+      });
+      setBusyLabel('');
+      return;
+    }
+
+    setSelectedTypeDetail(result.type ?? null);
+    await refreshSchema(settings);
+    setSchemaExpanded(false);
+    setSchemaActionMessage({
       kind: 'success',
-      text: `${result.type.name} is ready.`,
+      text: 'Schema is ready.',
     });
     setBusyLabel('');
   }
@@ -330,8 +418,14 @@ function App() {
   ) {
     if (!typeId) {
       setSelectedTypeDetail(null);
+      setSelectedTypeDetailTypeId('');
+      setSelectedTypeDetailLoading(false);
       return;
     }
+
+    setSelectedTypeDetail(null);
+    setSelectedTypeDetailTypeId(typeId);
+    setSelectedTypeDetailLoading(true);
 
     const result = (await browser.runtime.sendMessage({
       type: 'anytype:get-type',
@@ -349,35 +443,65 @@ function App() {
 
     if (!result.ok) {
       setSelectedTypeDetail(null);
+      setSelectedTypeDetailTypeId(typeId);
+      setSelectedTypeDetailLoading(false);
       setStatusMessage(formatMessage(result.message, result.status, result.statusText));
       return;
     }
 
     setSelectedTypeDetail(result.type ?? null);
+    setSelectedTypeDetailTypeId(typeId);
+    setSelectedTypeDetailLoading(false);
   }
 
   const selectedSpace = spaces.find((space) => space.id === settings.targetSpaceId);
   const selectedType = types.find((type) => type.id === settings.targetTypeId);
   const availablePropertyKeys = new Set(
-    properties.flatMap((property) => [property.key, normalizePropertyName(property.name)]),
+    properties.flatMap((property) => [
+      normalizePropertyName(property.key),
+      normalizePropertyName(property.name),
+    ]),
   );
   const attachedPropertyKeys = new Set(
-    selectedTypeDetail?.propertyKeys.flatMap((key) => [key, normalizePropertyName(key)]) ?? [],
+    selectedTypeDetail?.propertyKeys.map((key) => normalizePropertyName(key)) ?? [],
   );
   const missingSpaceProperties = REQUIRED_PAPER_PROPERTIES.filter(
     (property) =>
-      !availablePropertyKeys.has(property.key) &&
+      !availablePropertyKeys.has(normalizePropertyName(property.key)) &&
       !availablePropertyKeys.has(normalizePropertyName(property.name)),
   );
   const missingTypeProperties =
-    settings.targetTypeMode === 'existing'
+    settings.targetTypeMode === 'existing' &&
+    !selectedTypeDetailLoading &&
+    selectedTypeDetailTypeId === settings.targetTypeId &&
+    selectedTypeDetail
       ? REQUIRED_PAPER_PROPERTIES.filter((property) => {
           const presentOnType =
-            attachedPropertyKeys.has(property.key) ||
+            attachedPropertyKeys.has(normalizePropertyName(property.key)) ||
             attachedPropertyKeys.has(normalizePropertyName(property.name));
           return !presentOnType;
         })
-      : REQUIRED_PAPER_PROPERTIES;
+      : [];
+  const schemaExamples = missingTypeProperties
+    .slice(0, 3)
+    .map((property) => property.name)
+    .join(', ');
+  const schemaMappings = missingTypeProperties.map((property) => {
+    const existingProperty = properties.find(
+      (availableProperty) =>
+        normalizePropertyName(availableProperty.key) ===
+          normalizePropertyName(property.key) ||
+        normalizePropertyName(availableProperty.name) ===
+          normalizePropertyName(property.name),
+    );
+
+    return {
+      property,
+      action: existingProperty
+        ? `Attach existing ${existingProperty.name}`
+        : `Create ${property.name}`,
+    };
+  });
   const connectedMessage =
     viewState === 'connected' && statusMessage.startsWith('Connected to Anytype')
       ? ''
@@ -478,11 +602,11 @@ function App() {
             </div>
           ) : null}
 
-          <div className="mt-5 grid gap-3">
-            <label className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-2.5">
+          <div className="mt-5 grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-x-2.5 gap-y-2">
+            <label className="contents">
               <span className="text-xs font-medium text-zinc-700">Target Space</span>
               <select
-                className="w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-950 outline-none transition focus:border-zinc-950"
+                className={compactSelectClass}
                 value={settings.targetSpaceId}
                 onChange={(event) => void handleTargetSpaceChange(event.target.value)}>
                 {spaces.length === 0 ? <option value="">No spaces available</option> : null}
@@ -496,10 +620,10 @@ function App() {
 
             {settings.targetSpaceId ? (
               <>
-                <div className="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] items-center gap-2.5">
-                  <span className="text-xs font-medium text-zinc-700">Target Type</span>
+                <span className="text-xs font-medium text-zinc-700">Target Type</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5">
                   <select
-                    className="w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-950 outline-none transition focus:border-zinc-950"
+                    className={compactSelectClass}
                     value={settings.targetTypeId}
                     onChange={(event) => void handleTargetTypeChange(event.target.value)}>
                     <option value="">Choose a type</option>
@@ -510,7 +634,7 @@ function App() {
                     ))}
                   </select>
                   <button
-                    className={inlineButtonClass}
+                    className={compactInlineButtonClass}
                     disabled={Boolean(busyLabel)}
                     type="button"
                     onClick={() => {
@@ -523,7 +647,7 @@ function App() {
                 </div>
 
                 {isCreatingType ? (
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2.5">
+                  <div className="col-start-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2.5">
                     <div className="flex items-center gap-2">
                       <input
                         className="min-w-0 flex-1 rounded-xl border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-950 outline-none transition focus:border-zinc-950"
@@ -545,7 +669,7 @@ function App() {
 
                 {typeActionMessage ? (
                   <p
-                    className={`text-sm ${
+                    className={`col-start-2 text-sm ${
                       typeActionMessage.kind === 'error'
                         ? 'text-amber-800'
                         : 'text-emerald-700'
@@ -557,46 +681,58 @@ function App() {
             ) : null}
           </div>
 
-          {settings.targetSpaceId ? (
-            <div className="mt-5 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                <span className={fieldLabelClass}>Schema Check</span>
-                {!settings.targetTypeId ? (
-                  <p className="text-sm text-zinc-600">
-                    Choose a target type, or create a new one, to inspect its fields.
-                  </p>
-                ) : (
-                  <>
-                    <p className="text-sm text-zinc-600">
-                      {selectedType
-                        ? `Using ${selectedType.name}. Missing fields shown below should be added with user approval.`
-                        : 'Choose an existing type to inspect its fields.'}
-                    </p>
-                    {missingTypeProperties.length === 0 ? (
-                      <p className="mt-3 text-sm font-medium text-emerald-700">
-                        This type already looks ready for paper import.
-                      </p>
-                    ) : (
-                      <ul className="mt-3 list-disc space-y-1.5 pl-5 text-sm text-zinc-600">
-                        {missingTypeProperties.map((property) => (
-                          <li key={property.key}>
-                            {property.name}
-                            {missingSpaceProperties.some((item) => item.key === property.key)
-                              ? ' (new property needed in space)'
-                              : ' (attach to this type)'}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </>
-                )}
+              {settings.targetSpaceId && settings.targetTypeId && missingTypeProperties.length > 0 ? (
+            <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2">
+              <div className="flex items-center gap-2">
+                <p className="min-w-0 flex-1 truncate text-xs text-zinc-600">
+                  {missingTypeProperties.length} missing
+                  {schemaExamples ? `: ${schemaExamples}` : ''}.
+                </p>
+                <button
+                  className="shrink-0 text-xs font-medium text-zinc-600 underline-offset-2 hover:text-zinc-950 hover:underline"
+                  type="button"
+                  onClick={() => setSchemaExpanded((value) => !value)}>
+                  {schemaExpanded ? 'Hide' : 'Details'}
+                </button>
+                <button
+                  className="shrink-0 rounded-md bg-zinc-950 px-2 py-1 text-xs font-medium text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-70"
+                  disabled={Boolean(busyLabel)}
+                  type="button"
+                  onClick={() => void handleApproveSchemaUpdate()}>
+                  Approve
+                </button>
+              </div>
+
+              {schemaExpanded ? (
+                <div className="mt-2 space-y-1.5 border-t border-zinc-200 pt-2">
+                  {schemaMappings.map(({ property, action }) => (
+                    <div
+                      className="grid grid-cols-[5rem_minmax(0,1fr)] gap-2 text-[0.6875rem] leading-snug"
+                      key={property.key}>
+                      <span className="font-medium text-zinc-700">{property.name}</span>
+                      <span className="text-zinc-500">
+                        {action}
+                        {missingSpaceProperties.some((item) => item.key === property.key)
+                          ? ` (${property.format})`
+                          : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {schemaActionMessage ? (
+                <p
+                  className={`mt-2 text-xs ${
+                    schemaActionMessage.kind === 'error'
+                      ? 'text-amber-800'
+                      : 'text-emerald-700'
+                  }`}>
+                  {schemaActionMessage.text}
+                </p>
+              ) : null}
             </div>
           ) : null}
-
-          <p className="mt-4 text-sm text-zinc-700">
-            {selectedSpace
-              ? `Anytype is connected. Imports will go to ${selectedSpace.name}.`
-              : 'Anytype is connected.'}
-          </p>
         </>
       ) : null}
     </main>
@@ -604,7 +740,12 @@ function App() {
 }
 
 function normalizePropertyName(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, '');
+  return value
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 function formatMessage(message: string, status?: number, statusText?: string) {

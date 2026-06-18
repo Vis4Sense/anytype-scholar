@@ -1,0 +1,599 @@
+import {
+  ANYTYPE_API_VERSION,
+  type AnytypeApiKeyResult,
+  type AnytypeChallengeResult,
+  type AnytypeConnectionCheckResult,
+  type AnytypeConnectionSettings,
+  type AnytypeProperty,
+  type AnytypeSpace,
+  type AnytypeType,
+  type AnytypeTypeDetail,
+  REQUIRED_PAPER_PROPERTIES,
+  normalizeConnectionSettings,
+} from '@/lib/anytype';
+import {
+  extractApiErrorMessage,
+  extractProperties,
+  extractSpaces,
+  extractTypes,
+  normalizeProperty,
+  normalizePropertyKey,
+  normalizeType,
+  normalizeTypeDetail,
+  normalizeTypeKey,
+  pluralizeTypeName,
+  safeJson,
+} from '@/lib/anytype-normalize';
+
+export async function checkConnection(
+  payload: AnytypeConnectionSettings,
+): Promise<AnytypeConnectionCheckResult> {
+  const settings = normalizeConnectionSettings(payload);
+
+  if (!settings.apiToken) {
+    return {
+      ok: false,
+      message: 'No API key saved yet.',
+    };
+  }
+
+  try {
+    const response = await fetchSpacesResponse(settings);
+    const data = await safeJson(response);
+
+    return {
+      ok: response.ok,
+      spaces: response.ok ? extractSpaces(data) : undefined,
+      status: response.status,
+      statusText: response.statusText,
+      message: response.ok ? 'Connected to Anytype.' : 'Saved credentials are not working.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+    };
+  }
+}
+
+export async function listSpaces(payload: AnytypeConnectionSettings): Promise<{
+  ok: boolean;
+  message: string;
+  spaces?: AnytypeSpace[];
+  status?: number;
+  statusText?: string;
+}> {
+  const settings = normalizeConnectionSettings(payload);
+
+  if (!settings.apiToken) {
+    return {
+      ok: false,
+      message: 'No API key saved yet.',
+    };
+  }
+
+  try {
+    const response = await fetchSpacesResponse(settings);
+    const data = await safeJson(response);
+
+    return {
+      ok: response.ok,
+      spaces: extractSpaces(data),
+      status: response.status,
+      statusText: response.statusText,
+      message: response.ok ? 'Spaces loaded.' : 'Failed to load spaces.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+    };
+  }
+}
+
+export async function listTypes(payload: AnytypeConnectionSettings): Promise<{
+  ok: boolean;
+  message: string;
+  types?: AnytypeType[];
+  status?: number;
+  statusText?: string;
+}> {
+  const settings = normalizeConnectionSettings(payload);
+
+  if (!settings.apiToken || !settings.targetSpaceId) {
+    return {
+      ok: false,
+      message: 'A connected Anytype space is required.',
+    };
+  }
+
+  try {
+    const response = await fetch(
+      `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/types`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${settings.apiToken}`,
+        },
+      },
+    );
+    const data = await safeJson(response);
+
+    return {
+      ok: response.ok,
+      types: extractTypes(data),
+      status: response.status,
+      statusText: response.statusText,
+      message: response.ok ? 'Types loaded.' : 'Failed to load types.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+    };
+  }
+}
+
+export async function listProperties(payload: AnytypeConnectionSettings): Promise<{
+  ok: boolean;
+  message: string;
+  properties?: AnytypeProperty[];
+  status?: number;
+  statusText?: string;
+}> {
+  const settings = normalizeConnectionSettings(payload);
+
+  if (!settings.apiToken || !settings.targetSpaceId) {
+    return {
+      ok: false,
+      message: 'A connected Anytype space is required.',
+    };
+  }
+
+  try {
+    const response = await fetch(
+      `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/properties`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${settings.apiToken}`,
+        },
+      },
+    );
+    const data = await safeJson(response);
+
+    return {
+      ok: response.ok,
+      properties: extractProperties(data),
+      status: response.status,
+      statusText: response.statusText,
+      message: response.ok ? 'Properties loaded.' : 'Failed to load properties.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+    };
+  }
+}
+
+export async function getType(
+  payload: AnytypeConnectionSettings,
+  typeId: string,
+): Promise<{
+  ok: boolean;
+  message: string;
+  type?: AnytypeTypeDetail;
+  status?: number;
+  statusText?: string;
+}> {
+  const settings = normalizeConnectionSettings(payload);
+
+  if (!settings.apiToken || !settings.targetSpaceId || !typeId.trim()) {
+    return {
+      ok: false,
+      message: 'A connected Anytype type is required.',
+    };
+  }
+
+  try {
+    const response = await fetch(
+      `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/types/${typeId.trim()}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${settings.apiToken}`,
+        },
+      },
+    );
+    const data = await safeJson(response);
+    const normalizedTypeSource =
+      (data as { type?: unknown } | null)?.type ??
+      (data as { data?: unknown } | null)?.data ??
+      data;
+
+    return {
+      ok: response.ok,
+      type: response.ok ? normalizeTypeDetail(normalizedTypeSource) ?? undefined : undefined,
+      status: response.status,
+      statusText: response.statusText,
+      message: response.ok ? 'Type loaded.' : 'Failed to load type details.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+    };
+  }
+}
+
+export async function createType(
+  payload: AnytypeConnectionSettings,
+  name: string,
+): Promise<{
+  ok: boolean;
+  message: string;
+  type?: AnytypeType;
+  status?: number;
+  statusText?: string;
+}> {
+  const settings = normalizeConnectionSettings(payload);
+  const trimmedName = name.trim();
+
+  if (!settings.apiToken || !settings.targetSpaceId) {
+    return {
+      ok: false,
+      message: 'A connected Anytype space is required.',
+    };
+  }
+
+  if (!trimmedName) {
+    return {
+      ok: false,
+      message: 'Type name is required.',
+    };
+  }
+
+  try {
+    const pluralName = pluralizeTypeName(trimmedName);
+    const paperPropertyLinks = REQUIRED_PAPER_PROPERTIES.map((property) => ({
+      key: normalizePropertyKey(property.key),
+      name: property.name,
+      format: property.format,
+    }));
+    const attempts = [
+      {
+        name: trimmedName,
+        plural_name: pluralName,
+        layout: 'basic',
+        properties: paperPropertyLinks,
+      },
+      {
+        name: trimmedName,
+        plural_name: pluralName,
+        layout: 'basic',
+        key: normalizeTypeKey(trimmedName),
+        properties: paperPropertyLinks,
+      },
+      {
+        name: trimmedName,
+        pluralName,
+        layout: 'basic',
+        key: normalizeTypeKey(trimmedName),
+        properties: paperPropertyLinks,
+      },
+      {
+        Name: trimmedName,
+        PluralName: pluralName,
+        Layout: 'basic',
+        Key: normalizeTypeKey(trimmedName),
+        Properties: paperPropertyLinks,
+      },
+    ];
+
+    let lastResponse: Response | null = null;
+    let lastData: unknown = null;
+
+    for (const body of attempts) {
+      const response = await fetch(
+        `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/types`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${settings.apiToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        },
+      );
+      const data = await safeJson(response);
+      const createdType = normalizeType(
+        (data as { type?: unknown } | null)?.type ??
+          (data as { data?: unknown } | null)?.data ??
+          data,
+      );
+
+      if (response.ok && createdType) {
+        return {
+          ok: true,
+          type: createdType,
+          status: response.status,
+          statusText: response.statusText,
+          message: 'Type created.',
+        };
+      }
+
+      lastResponse = response;
+      lastData = data;
+    }
+
+    return {
+      ok: false,
+      status: lastResponse?.status,
+      statusText: lastResponse?.statusText,
+      message: extractApiErrorMessage(lastData) || 'Failed to create type.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+    };
+  }
+}
+
+export async function createProperty(
+  settings: AnytypeConnectionSettings,
+  property: (typeof REQUIRED_PAPER_PROPERTIES)[number],
+): Promise<{
+  ok: boolean;
+  message: string;
+  property?: AnytypeProperty;
+  status?: number;
+  statusText?: string;
+}> {
+  const attempts = [
+    {
+      name: property.name,
+      key: normalizePropertyKey(property.key),
+      format: property.format,
+    },
+    {
+      name: property.name,
+      format: property.format,
+    },
+    {
+      name: property.name,
+      type: property.format,
+    },
+  ];
+  let lastResponse: Response | null = null;
+  let lastData: unknown = null;
+
+  for (const body of attempts) {
+    const response = await fetch(
+      `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/properties`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${settings.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    const data = await safeJson(response);
+    const createdProperty = normalizeProperty(
+      (data as { property?: unknown } | null)?.property ??
+        (data as { data?: unknown } | null)?.data ??
+        data,
+    );
+
+    if (response.ok && createdProperty) {
+      return {
+        ok: true,
+        property: createdProperty,
+        message: 'Property created.',
+      };
+    }
+
+    lastResponse = response;
+    lastData = data;
+  }
+
+  return {
+    ok: false,
+    status: lastResponse?.status,
+    statusText: lastResponse?.statusText,
+    message: extractApiErrorMessage(lastData) || `Failed to create ${property.name}.`,
+  };
+}
+
+export async function updateTypeProperties(
+  settings: AnytypeConnectionSettings,
+  typeId: string,
+  type: AnytypeTypeDetail,
+  properties: Array<{
+    key: string;
+    name: string;
+    format: string;
+  }>,
+): Promise<{
+  ok: boolean;
+  message: string;
+  type?: AnytypeTypeDetail;
+  status?: number;
+  statusText?: string;
+}> {
+  const attempts = [
+    {
+      name: type.name,
+      plural_name: type.pluralName,
+      layout: type.layout,
+      properties,
+    },
+    {
+      name: type.name,
+      properties,
+    },
+  ];
+  let lastResponse: Response | null = null;
+  let lastData: unknown = null;
+
+  for (const body of attempts) {
+    const response = await fetch(
+      `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/types/${typeId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${settings.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    const data = await safeJson(response);
+    const updatedType = normalizeTypeDetail(
+      (data as { type?: unknown } | null)?.type ??
+        (data as { data?: unknown } | null)?.data ??
+        data,
+    );
+
+    if (response.ok) {
+      return {
+        ok: true,
+        type: updatedType ?? undefined,
+        message: 'Type updated.',
+      };
+    }
+
+    lastResponse = response;
+    lastData = data;
+  }
+
+  return {
+    ok: false,
+    status: lastResponse?.status,
+    statusText: lastResponse?.statusText,
+    message: extractApiErrorMessage(lastData) || 'Failed to update type.',
+  };
+}
+
+export async function createChallenge(
+  payload: AnytypeConnectionSettings,
+): Promise<AnytypeChallengeResult> {
+  const settings = normalizeConnectionSettings(payload);
+
+  if (!settings.baseUrl) {
+    return {
+      ok: false,
+      message: 'Base URL is required.',
+    };
+  }
+
+  try {
+    const response = await fetch(`${settings.baseUrl}/v1/auth/challenges`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Anytype-Version': ANYTYPE_API_VERSION,
+      },
+      body: JSON.stringify({
+        app_name: settings.appName,
+      }),
+    });
+
+    const data = (await safeJson(response)) as { challenge_id?: string } | null;
+
+    if (!response.ok || !data?.challenge_id) {
+      return {
+        ok: false,
+        status: response.status,
+        statusText: response.statusText,
+        message: 'Failed to create an authentication challenge.',
+      };
+    }
+
+    return {
+      ok: true,
+      challengeId: data.challenge_id,
+      status: response.status,
+      statusText: response.statusText,
+      message: 'Challenge created. Check the Anytype desktop app for the 4-digit code.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+    };
+  }
+}
+
+export async function createApiKey(
+  payload: AnytypeConnectionSettings,
+  challengeId: string,
+  code: string,
+): Promise<AnytypeApiKeyResult> {
+  const settings = normalizeConnectionSettings(payload);
+
+  if (!settings.baseUrl) {
+    return {
+      ok: false,
+      message: 'Base URL is required.',
+    };
+  }
+
+  try {
+    const response = await fetch(`${settings.baseUrl}/v1/auth/api_keys`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Anytype-Version': ANYTYPE_API_VERSION,
+      },
+      body: JSON.stringify({
+        challenge_id: challengeId.trim(),
+        code: code.trim(),
+      }),
+    });
+
+    const data = (await safeJson(response)) as { api_key?: string } | null;
+
+    if (!response.ok || !data?.api_key) {
+      return {
+        ok: false,
+        status: response.status,
+        statusText: response.statusText,
+        message: 'Failed to exchange the challenge for an API key.',
+      };
+    }
+
+    return {
+      ok: true,
+      apiKey: data.api_key,
+      status: response.status,
+      statusText: response.statusText,
+      message: 'API key created successfully.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+    };
+  }
+}
+
+function fetchSpacesResponse(settings: AnytypeConnectionSettings) {
+  return fetch(`${settings.baseUrl}/v1/spaces`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${settings.apiToken}`,
+    },
+  });
+}

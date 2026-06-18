@@ -26,6 +26,9 @@ export type AnytypeProperty = {
 };
 
 export type AnytypeTypeDetail = AnytypeType & {
+  layout?: string;
+  pluralName?: string;
+  properties: AnytypeProperty[];
   propertyKeys: string[];
 };
 
