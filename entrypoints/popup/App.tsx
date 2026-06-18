@@ -7,6 +7,7 @@ import {
   type AnytypeChallengeResult,
   type AnytypeConnectionCheckResult,
   type AnytypeConnectionSettings,
+  type AnytypeImportResult,
   type AnytypeProperty,
   type AnytypeSpace,
   type AnytypeType,
@@ -15,12 +16,22 @@ import {
   loadConnectionSettings,
   saveConnectionSettings,
 } from '@/lib/anytype';
+import { parseBibtexEntries } from '@/lib/bibtex';
+import { BibtexImportPanel } from './components/BibtexImportPanel';
+import { ConnectionPanel } from './components/ConnectionPanel';
+import { TargetSetupPanel } from './components/TargetSetupPanel';
 
 type ViewState = 'checking' | 'disconnected' | 'awaiting-code' | 'connected';
+type InlineMessage = {
+  kind: 'error' | 'success';
+  text: string;
+} | null;
 
 const fieldLabelClass = 'mb-2 block text-sm font-medium text-zinc-700';
 const inputClass =
   'w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-950 outline-none transition focus:border-zinc-950';
+const textAreaClass =
+  'min-h-36 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-950 outline-none transition focus:border-zinc-950';
 const buttonClass =
   'mt-5 w-full rounded-xl border border-zinc-950 bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-70';
 const inlineButtonClass =
@@ -49,15 +60,15 @@ function App() {
   const [busyLabel, setBusyLabel] = useState('');
   const [isCreatingType, setIsCreatingType] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
-  const [typeActionMessage, setTypeActionMessage] = useState<{
-    kind: 'error' | 'success';
-    text: string;
-  } | null>(null);
+  const [typeActionMessage, setTypeActionMessage] = useState<InlineMessage>(null);
   const [schemaExpanded, setSchemaExpanded] = useState(false);
-  const [schemaActionMessage, setSchemaActionMessage] = useState<{
-    kind: 'error' | 'success';
-    text: string;
-  } | null>(null);
+  const [schemaActionMessage, setSchemaActionMessage] = useState<InlineMessage>(null);
+  const [bibtexInput, setBibtexInput] = useState('');
+  const [parsedEntries, setParsedEntries] = useState<
+    ReturnType<typeof parseBibtexEntries>
+  >([]);
+  const [parseMessage, setParseMessage] = useState<InlineMessage>(null);
+  const [importResult, setImportResult] = useState<AnytypeImportResult | null>(null);
 
   useEffect(() => {
     void initialize();
@@ -72,21 +83,21 @@ function App() {
       payload: stored,
     })) as AnytypeConnectionCheckResult;
 
-    if (result.ok) {
-      const nextSettings = await syncSpaces(stored, result.spaces ?? []);
-      await refreshSchema(nextSettings);
-      setSettings(nextSettings);
-      setViewState('connected');
-      setStatusMessage(
-        nextSettings.targetSpaceId
-          ? 'Connected to Anytype.'
-          : 'Connected to Anytype. Choose a target Space to continue.',
-      );
+    if (!result.ok) {
+      setViewState('disconnected');
+      setStatusMessage('Not connected yet.');
       return;
     }
 
-    setViewState('disconnected');
-    setStatusMessage('Not connected yet.');
+    const nextSettings = await syncSpaces(stored, result.spaces ?? []);
+    await refreshSchema(nextSettings);
+    setSettings(nextSettings);
+    setViewState('connected');
+    setStatusMessage(
+      nextSettings.targetSpaceId
+        ? 'Connected to Anytype.'
+        : 'Connected to Anytype. Choose a target Space to continue.',
+    );
   }
 
   async function handleConnect() {
@@ -257,11 +268,10 @@ function App() {
     };
 
     setSettings(nextSettings);
-    setIsCreatingType(false);
-    setNewTypeName('');
-    setTypeActionMessage(null);
-    setSchemaExpanded(false);
-    setSchemaActionMessage(null);
+    resetSetupMessages();
+    setParsedEntries([]);
+    setParseMessage(null);
+    setImportResult(null);
     await saveConnectionSettings(nextSettings);
     await refreshSchema(nextSettings);
     setStatusMessage('Connected to Anytype.');
@@ -275,11 +285,8 @@ function App() {
     };
 
     setSettings(nextSettings);
-    setIsCreatingType(false);
-    setNewTypeName('');
-    setTypeActionMessage(null);
-    setSchemaExpanded(false);
-    setSchemaActionMessage(null);
+    resetSetupMessages();
+    setImportResult(null);
     await saveConnectionSettings(nextSettings);
     await refreshSelectedType(nextSettings, targetTypeId);
   }
@@ -297,6 +304,7 @@ function App() {
 
     setBusyLabel('Creating type...');
     setTypeActionMessage(null);
+
     const result = (await browser.runtime.sendMessage({
       type: 'anytype:create-type',
       payload: {
@@ -454,6 +462,82 @@ function App() {
     setSelectedTypeDetailLoading(false);
   }
 
+  function handleParseBibtex() {
+    const nextEntries = parseBibtexEntries(bibtexInput);
+
+    if (nextEntries.length === 0) {
+      setParsedEntries([]);
+      setParseMessage({
+        kind: 'error',
+        text: 'No BibTeX entries were found.',
+      });
+      setImportResult(null);
+      return;
+    }
+
+    setParsedEntries(nextEntries);
+    setParseMessage({
+      kind: 'success',
+      text: `Parsed ${nextEntries.length} entr${nextEntries.length === 1 ? 'y' : 'ies'}.`,
+    });
+    setImportResult(null);
+  }
+
+  async function handleImportBibtex() {
+    if (!settings.targetSpaceId || !settings.targetTypeId) {
+      setParseMessage({
+        kind: 'error',
+        text: 'Choose a target Space and Type first.',
+      });
+      return;
+    }
+
+    if (missingTypeProperties.length > 0) {
+      setParseMessage({
+        kind: 'error',
+        text: 'Approve the schema changes before importing.',
+      });
+      return;
+    }
+
+    const nextEntries = parseBibtexEntries(bibtexInput);
+    if (nextEntries.length === 0) {
+      setParsedEntries([]);
+      setParseMessage({
+        kind: 'error',
+        text: 'No BibTeX entries were found.',
+      });
+      setImportResult(null);
+      return;
+    }
+
+    setParsedEntries(nextEntries);
+    setParseMessage({
+      kind: 'success',
+      text: `Parsed ${nextEntries.length} entr${nextEntries.length === 1 ? 'y' : 'ies'}.`,
+    });
+    setBusyLabel('Importing...');
+
+    const result = (await browser.runtime.sendMessage({
+      type: 'anytype:import-bibtex',
+      payload: {
+        settings,
+        bibtex: bibtexInput,
+      },
+    })) as AnytypeImportResult;
+
+    setImportResult(result);
+    setBusyLabel('');
+  }
+
+  function resetSetupMessages() {
+    setIsCreatingType(false);
+    setNewTypeName('');
+    setTypeActionMessage(null);
+    setSchemaExpanded(false);
+    setSchemaActionMessage(null);
+  }
+
   const selectedSpace = spaces.find((space) => space.id === settings.targetSpaceId);
   const selectedType = types.find((type) => type.id === settings.targetTypeId);
   const availablePropertyKeys = new Set(
@@ -506,6 +590,12 @@ function App() {
     viewState === 'connected' && statusMessage.startsWith('Connected to Anytype')
       ? ''
       : statusMessage;
+  const canImport =
+    viewState === 'connected' &&
+    Boolean(settings.targetSpaceId) &&
+    Boolean(settings.targetTypeId) &&
+    missingTypeProperties.length === 0 &&
+    !selectedTypeDetailLoading;
   const connectionBadge =
     viewState === 'connected'
       ? {
@@ -548,51 +638,18 @@ function App() {
         </div>
       </div>
 
-      {viewState !== 'connected' && viewState !== 'disconnected' ? (
-        <>
-          <p className="mt-2.5 text-sm text-zinc-600">{statusMessage}</p>
-        </>
-      ) : null}
-
-      {viewState === 'checking' ? <p className="mt-4 text-sm text-zinc-500">Checking...</p> : null}
-
-      {viewState === 'disconnected' ? (
-        <>
-          <h1 className="mt-4 text-center text-lg font-semibold leading-tight text-zinc-950">
-            Welcome to Anytype Scholar!
-          </h1>
-          <button
-            className={buttonClass}
-            disabled={Boolean(busyLabel)}
-            onClick={() => void handleConnect()}>
-            {busyLabel || 'Connect to Anytype'}
-          </button>
-        </>
-      ) : null}
-
-      {viewState === 'awaiting-code' ? (
-        <>
-          <label className="mt-5 block">
-            <span className={fieldLabelClass}>4-digit code</span>
-            <input
-              className={inputClass}
-              type="text"
-              inputMode="numeric"
-              maxLength={4}
-              placeholder="1234"
-              value={code}
-              onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))}
-            />
-          </label>
-
-          <button
-            className={buttonClass}
-            disabled={code.trim().length !== 4 || Boolean(busyLabel)}
-            onClick={() => void handleSubmitCode()}>
-            {busyLabel || 'Connect'}
-          </button>
-        </>
-      ) : null}
+      <ConnectionPanel
+        viewState={viewState}
+        statusMessage={statusMessage}
+        busyLabel={busyLabel}
+        code={code}
+        fieldLabelClass={fieldLabelClass}
+        inputClass={inputClass}
+        buttonClass={buttonClass}
+        onCodeChange={setCode}
+        onConnect={() => void handleConnect()}
+        onSubmitCode={() => void handleSubmitCode()}
+      />
 
       {viewState === 'connected' ? (
         <>
@@ -602,137 +659,50 @@ function App() {
             </div>
           ) : null}
 
-          <div className="mt-5 grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-x-2.5 gap-y-2">
-            <label className="contents">
-              <span className="text-xs font-medium text-zinc-700">Target Space</span>
-              <select
-                className={compactSelectClass}
-                value={settings.targetSpaceId}
-                onChange={(event) => void handleTargetSpaceChange(event.target.value)}>
-                {spaces.length === 0 ? <option value="">No spaces available</option> : null}
-                {spaces.map((space) => (
-                  <option key={space.id} value={space.id}>
-                    {space.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <TargetSetupPanel
+            settings={settings}
+            spaces={spaces}
+            types={types}
+            selectedTypeName={selectedType?.name ?? ''}
+            busyLabel={busyLabel}
+            isCreatingType={isCreatingType}
+            newTypeName={newTypeName}
+            typeActionMessage={typeActionMessage}
+            schemaExpanded={schemaExpanded}
+            schemaActionMessage={schemaActionMessage}
+            missingTypePropertiesLength={missingTypeProperties.length}
+            schemaExamples={schemaExamples}
+            schemaMappings={schemaMappings}
+            missingSpaceProperties={missingSpaceProperties}
+            compactSelectClass={compactSelectClass}
+            compactInlineButtonClass={compactInlineButtonClass}
+            inlineButtonClass={inlineButtonClass}
+            onTargetSpaceChange={(value) => void handleTargetSpaceChange(value)}
+            onTargetTypeChange={(value) => void handleTargetTypeChange(value)}
+            onToggleCreateType={() => {
+              setIsCreatingType((value) => !value);
+              setNewTypeName('');
+              setTypeActionMessage(null);
+            }}
+            onNewTypeNameChange={setNewTypeName}
+            onCreateType={() => void handleCreateType()}
+            onToggleSchemaExpanded={() => setSchemaExpanded((value) => !value)}
+            onApproveSchemaUpdate={() => void handleApproveSchemaUpdate()}
+          />
 
-            {settings.targetSpaceId ? (
-              <>
-                <span className="text-xs font-medium text-zinc-700">Target Type</span>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5">
-                  <select
-                    className={compactSelectClass}
-                    value={settings.targetTypeId}
-                    onChange={(event) => void handleTargetTypeChange(event.target.value)}>
-                    <option value="">Choose a type</option>
-                    {types.map((type) => (
-                      <option key={type.id} value={type.id}>
-                        {type.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className={compactInlineButtonClass}
-                    disabled={Boolean(busyLabel)}
-                    type="button"
-                    onClick={() => {
-                      setIsCreatingType((value) => !value);
-                      setNewTypeName('');
-                      setTypeActionMessage(null);
-                    }}>
-                    + New
-                  </button>
-                </div>
-
-                {isCreatingType ? (
-                  <div className="col-start-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2.5">
-                    <div className="flex items-center gap-2">
-                      <input
-                        className="min-w-0 flex-1 rounded-xl border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-950 outline-none transition focus:border-zinc-950"
-                        placeholder="Paper"
-                        type="text"
-                        value={newTypeName}
-                        onChange={(event) => setNewTypeName(event.target.value)}
-                      />
-                      <button
-                        className={inlineButtonClass}
-                        disabled={Boolean(busyLabel) || !newTypeName.trim()}
-                        type="button"
-                        onClick={() => void handleCreateType()}>
-                        Create
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-
-                {typeActionMessage ? (
-                  <p
-                    className={`col-start-2 text-sm ${
-                      typeActionMessage.kind === 'error'
-                        ? 'text-amber-800'
-                        : 'text-emerald-700'
-                    }`}>
-                    {typeActionMessage.text}
-                  </p>
-                ) : null}
-              </>
-            ) : null}
-          </div>
-
-              {settings.targetSpaceId && settings.targetTypeId && missingTypeProperties.length > 0 ? (
-            <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2">
-              <div className="flex items-center gap-2">
-                <p className="min-w-0 flex-1 truncate text-xs text-zinc-600">
-                  {missingTypeProperties.length} missing
-                  {schemaExamples ? `: ${schemaExamples}` : ''}.
-                </p>
-                <button
-                  className="shrink-0 text-xs font-medium text-zinc-600 underline-offset-2 hover:text-zinc-950 hover:underline"
-                  type="button"
-                  onClick={() => setSchemaExpanded((value) => !value)}>
-                  {schemaExpanded ? 'Hide' : 'Details'}
-                </button>
-                <button
-                  className="shrink-0 rounded-md bg-zinc-950 px-2 py-1 text-xs font-medium text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-70"
-                  disabled={Boolean(busyLabel)}
-                  type="button"
-                  onClick={() => void handleApproveSchemaUpdate()}>
-                  Approve
-                </button>
-              </div>
-
-              {schemaExpanded ? (
-                <div className="mt-2 space-y-1.5 border-t border-zinc-200 pt-2">
-                  {schemaMappings.map(({ property, action }) => (
-                    <div
-                      className="grid grid-cols-[5rem_minmax(0,1fr)] gap-2 text-[0.6875rem] leading-snug"
-                      key={property.key}>
-                      <span className="font-medium text-zinc-700">{property.name}</span>
-                      <span className="text-zinc-500">
-                        {action}
-                        {missingSpaceProperties.some((item) => item.key === property.key)
-                          ? ` (${property.format})`
-                          : ''}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-
-              {schemaActionMessage ? (
-                <p
-                  className={`mt-2 text-xs ${
-                    schemaActionMessage.kind === 'error'
-                      ? 'text-amber-800'
-                      : 'text-emerald-700'
-                  }`}>
-                  {schemaActionMessage.text}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+          <BibtexImportPanel
+            bibtexInput={bibtexInput}
+            parseMessage={parseMessage}
+            importResult={importResult}
+            busyLabel={busyLabel}
+            canImport={canImport}
+            onBibtexInputChange={(value) => {
+              setBibtexInput(value);
+              setParseMessage(null);
+              setImportResult(null);
+            }}
+            onImportBibtex={() => void handleImportBibtex()}
+          />
         </>
       ) : null}
     </main>

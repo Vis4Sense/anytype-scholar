@@ -32,6 +32,44 @@ export type AnytypeTypeDetail = AnytypeType & {
   propertyKeys: string[];
 };
 
+export type AnytypeObjectPropertyValue = {
+  key: string;
+  text?: string;
+  number?: number;
+  url?: string;
+};
+
+export type ParsedBibEntry = {
+  citationKey?: string;
+  entryType?: string;
+  title?: string;
+  authors?: string[];
+  year?: string;
+  venue?: string;
+  doi?: string;
+  url?: string;
+  abstract?: string;
+  keywords?: string[];
+  rawBibtex: string;
+};
+
+export type AnytypeImportItemResult = {
+  name: string;
+  status: 'imported' | 'skipped' | 'failed';
+  reason: string;
+};
+
+export type AnytypeImportResult = {
+  ok: boolean;
+  message: string;
+  parsedCount: number;
+  importedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  results: AnytypeImportItemResult[];
+  warning?: string;
+};
+
 export type AnytypeConnectionCheckResult = {
   ok: boolean;
   message: string;

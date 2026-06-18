@@ -4,6 +4,7 @@ import {
   type AnytypeChallengeResult,
   type AnytypeConnectionCheckResult,
   type AnytypeConnectionSettings,
+  type AnytypeObjectPropertyValue,
   type AnytypeProperty,
   type AnytypeSpace,
   type AnytypeType,
@@ -484,6 +485,188 @@ export async function updateTypeProperties(
   };
 }
 
+type AnytypeObjectSummary = {
+  id: string;
+  name: string;
+  typeId: string;
+  properties: Record<string, string | number>;
+};
+
+export async function listObjects(
+  payload: AnytypeConnectionSettings,
+): Promise<{
+  ok: boolean;
+  message: string;
+  objects?: AnytypeObjectSummary[];
+  status?: number;
+  statusText?: string;
+}> {
+  const settings = normalizeConnectionSettings(payload);
+
+  if (!settings.apiToken || !settings.targetSpaceId) {
+    return {
+      ok: false,
+      message: 'A connected Anytype space is required.',
+    };
+  }
+
+  const endpoints = [
+    `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects?type_id=${encodeURIComponent(settings.targetTypeId)}`,
+    `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects?typeId=${encodeURIComponent(settings.targetTypeId)}`,
+    `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects`,
+  ];
+
+  let lastResponse: Response | null = null;
+  let lastData: unknown = null;
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${settings.apiToken}`,
+        },
+      });
+      const data = await safeJson(response);
+
+      if (response.ok) {
+        return {
+          ok: true,
+          objects: extractObjects(data),
+          status: response.status,
+          statusText: response.statusText,
+          message: 'Objects loaded.',
+        };
+      }
+
+      lastResponse = response;
+      lastData = data;
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    status: lastResponse?.status,
+    statusText: lastResponse?.statusText,
+    message: extractApiErrorMessage(lastData) || 'Failed to load existing objects.',
+  };
+}
+
+export async function createObject(
+  payload: AnytypeConnectionSettings,
+  input: {
+    name: string;
+    properties: AnytypeObjectPropertyValue[];
+    bodyMarkdown?: string;
+  },
+): Promise<{
+  ok: boolean;
+  message: string;
+  object?: AnytypeObjectSummary;
+  status?: number;
+  statusText?: string;
+}> {
+  const settings = normalizeConnectionSettings(payload);
+  const trimmedName = input.name.trim();
+
+  if (!settings.apiToken || !settings.targetSpaceId || !settings.targetTypeId) {
+    return {
+      ok: false,
+      message: 'A connected Anytype type is required.',
+    };
+  }
+
+  if (!trimmedName) {
+    return {
+      ok: false,
+      message: 'Object name is required.',
+    };
+  }
+
+  const typeKey = await resolveTargetTypeKey(settings);
+
+  const attempts = [
+    {
+      body: input.bodyMarkdown,
+      name: trimmedName,
+      type_key: typeKey,
+      properties: input.properties,
+    },
+    {
+      body: input.bodyMarkdown,
+      name: trimmedName,
+      typeKey,
+      properties: input.properties,
+    },
+  ];
+
+  let lastResponse: Response | null = null;
+  let lastData: unknown = null;
+
+  for (const body of attempts) {
+    try {
+      const response = await fetch(
+        `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${settings.apiToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        },
+      );
+      const data = await safeJson(response);
+
+      if (response.ok) {
+        const createdObject = normalizeObject(
+          (data as { object?: unknown } | null)?.object ??
+            (data as { data?: unknown } | null)?.data ??
+            data,
+        );
+
+        if (createdObject?.id) {
+          await updateObject(settings, createdObject.id, {
+            name: trimmedName,
+            properties: input.properties,
+            bodyMarkdown: input.bodyMarkdown,
+          });
+        }
+
+        return {
+          ok: true,
+          object: createdObject,
+          status: response.status,
+          statusText: response.statusText,
+          message: 'Object created.',
+        };
+      }
+
+      lastResponse = response;
+      lastData = data;
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    status: lastResponse?.status,
+    statusText: lastResponse?.statusText,
+    message: extractApiErrorMessage(lastData) || 'Failed to create object.',
+  };
+}
+
 export async function createChallenge(
   payload: AnytypeConnectionSettings,
 ): Promise<AnytypeChallengeResult> {
@@ -596,4 +779,193 @@ function fetchSpacesResponse(settings: AnytypeConnectionSettings) {
       Authorization: `Bearer ${settings.apiToken}`,
     },
   });
+}
+
+async function resolveTargetTypeKey(settings: AnytypeConnectionSettings) {
+  if (!settings.targetTypeId.trim()) {
+    return '';
+  }
+
+  const typeResult = await getType(settings, settings.targetTypeId);
+  if (typeResult.ok && typeResult.type?.key) {
+    return typeResult.type.key;
+  }
+
+  const typesResult = await listTypes(settings);
+  if (!typesResult.ok) {
+    return '';
+  }
+
+  return (
+    typesResult.types?.find((type) => type.id === settings.targetTypeId)?.key ?? ''
+  );
+}
+
+async function updateObject(
+  settings: AnytypeConnectionSettings,
+  objectId: string,
+  input: {
+    name: string;
+    properties: AnytypeObjectPropertyValue[];
+    bodyMarkdown?: string;
+  },
+) {
+  const attempts = [
+    {
+      name: input.name,
+      properties: input.properties,
+      body: input.bodyMarkdown,
+    },
+    {
+      details: input.properties,
+      body: input.bodyMarkdown,
+    },
+    {
+      body: input.bodyMarkdown,
+    },
+  ];
+
+  for (const body of attempts) {
+    try {
+      const response = await fetch(
+        `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects/${objectId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${settings.apiToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        },
+      );
+
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      return;
+    }
+  }
+}
+
+function extractObjects(data: unknown): AnytypeObjectSummary[] {
+  const candidates = Array.isArray(data)
+    ? data
+    : Array.isArray((data as { objects?: unknown })?.objects)
+      ? ((data as { objects: unknown[] }).objects ?? [])
+      : Array.isArray((data as { data?: unknown })?.data)
+        ? ((data as { data: unknown[] }).data ?? [])
+        : [];
+
+  return candidates
+    .map((value) => normalizeObject(value))
+    .filter((value): value is AnytypeObjectSummary => Boolean(value));
+}
+
+function normalizeObject(value: unknown): AnytypeObjectSummary | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const id =
+    typeof candidate.id === 'string'
+      ? candidate.id
+      : typeof candidate.object_id === 'string'
+        ? candidate.object_id
+        : '';
+  const name =
+    typeof candidate.name === 'string'
+      ? candidate.name
+      : typeof candidate.title === 'string'
+        ? candidate.title
+        : '';
+  const typeId =
+    typeof candidate.type_id === 'string'
+      ? candidate.type_id
+      : typeof candidate.typeId === 'string'
+        ? candidate.typeId
+        : typeof candidate.type === 'string'
+          ? candidate.type
+          : '';
+  const properties = collectObjectProperties(candidate);
+
+  if (!id && !name && !typeId) {
+    return undefined;
+  }
+
+  return {
+    id: id || name || typeId,
+    name: name || String(properties.name ?? ''),
+    typeId,
+    properties,
+  };
+}
+
+function collectObjectProperties(candidate: Record<string, unknown>) {
+  const values = [
+    candidate.properties,
+    candidate.fields,
+    candidate.details,
+    candidate.relations,
+  ];
+  const properties: Record<string, string | number> = {};
+
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (!entry || typeof entry !== 'object') {
+          continue;
+        }
+
+        const property = entry as Record<string, unknown>;
+        const key = typeof property.key === 'string' ? property.key : '';
+        const propertyValue =
+          typeof property.text === 'string' || typeof property.text === 'number'
+            ? property.text
+            : typeof property.number === 'number'
+              ? property.number
+              : typeof property.url === 'string'
+                ? property.url
+                : undefined;
+
+        if (key && (typeof propertyValue === 'string' || typeof propertyValue === 'number')) {
+          properties[key] = propertyValue;
+        }
+      }
+
+      continue;
+    }
+
+    if (!value || typeof value !== 'object') {
+      continue;
+    }
+
+    for (const [key, entry] of Object.entries(value)) {
+      if (typeof entry === 'string' || typeof entry === 'number') {
+        properties[key] = entry;
+        continue;
+      }
+
+      if (!entry || typeof entry !== 'object') {
+        continue;
+      }
+
+      const nested = entry as Record<string, unknown>;
+      const nestedValue =
+        typeof nested.value === 'string' || typeof nested.value === 'number'
+          ? nested.value
+          : typeof nested.text === 'string'
+            ? nested.text
+            : typeof nested.name === 'string'
+              ? nested.name
+              : undefined;
+
+      if (typeof nestedValue === 'string' || typeof nestedValue === 'number') {
+        properties[key] = nestedValue;
+      }
+    }
+  }
+
+  return properties;
 }

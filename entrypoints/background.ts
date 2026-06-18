@@ -1,4 +1,4 @@
-import type { AnytypeConnectionSettings } from '@/lib/anytype';
+import type { AnytypeConnectionSettings, AnytypeImportResult } from '@/lib/anytype';
 import {
   checkConnection,
   createApiKey,
@@ -9,6 +9,7 @@ import {
   listSpaces,
   listTypes,
 } from '@/lib/anytype-client';
+import { importBibtex } from '@/lib/anytype-import';
 import { preparePaperType } from '@/lib/anytype-schema';
 
 type AnytypeMessage =
@@ -61,6 +62,13 @@ type AnytypeMessage =
         typeId: string;
         typeName: string;
       };
+    }
+  | {
+      type: 'anytype:import-bibtex';
+      payload: {
+        settings: AnytypeConnectionSettings;
+        bibtex: string;
+      };
     };
 
 export default defineBackground(() => {
@@ -107,6 +115,10 @@ export default defineBackground(() => {
         message.payload.typeId,
         message.payload.typeName,
       );
+    }
+
+    if (message?.type === 'anytype:import-bibtex') {
+      return importBibtex(message.payload.settings, message.payload.bibtex) as Promise<AnytypeImportResult>;
     }
 
     return undefined;
