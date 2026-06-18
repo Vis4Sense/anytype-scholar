@@ -3,7 +3,9 @@ import {
   DEFAULT_CONNECTION_SETTINGS,
   type AnytypeApiKeyResult,
   type AnytypeChallengeResult,
+  type AnytypeConnectionCheckResult,
   type AnytypeConnectionSettings,
+  type AnytypeSpace,
   loadConnectionSettings,
   saveConnectionSettings,
 } from '@/lib/anytype';
@@ -18,6 +20,7 @@ function App() {
   const [viewState, setViewState] = useState<ViewState>('checking');
   const [challengeId, setChallengeId] = useState('');
   const [code, setCode] = useState('');
+  const [spaces, setSpaces] = useState<AnytypeSpace[]>([]);
   const [statusMessage, setStatusMessage] = useState('Checking local Anytype connection...');
   const [busyLabel, setBusyLabel] = useState('');
 
@@ -29,14 +32,20 @@ function App() {
     const stored = await loadConnectionSettings();
     setSettings(stored);
 
-    const result = await browser.runtime.sendMessage({
+    const result = (await browser.runtime.sendMessage({
       type: 'anytype:check-connection',
       payload: stored,
-    });
+    })) as AnytypeConnectionCheckResult;
 
     if (result.ok) {
+      const nextSettings = await syncSpaces(stored, result.spaces ?? []);
+      setSettings(nextSettings);
       setViewState('connected');
-      setStatusMessage('Connected to Anytype.');
+      setStatusMessage(
+        nextSettings.targetSpaceId
+          ? 'Connected to Anytype.'
+          : 'Connected to Anytype. Choose a target Space to continue.',
+      );
       return;
     }
 
@@ -86,9 +95,15 @@ function App() {
         apiToken: result.apiKey,
       };
       await saveConnectionSettings(nextSettings);
-      setSettings(nextSettings);
+      const { settings: syncedSettings, message } = await refreshSpaces(nextSettings);
+      setSettings(syncedSettings);
       setViewState('connected');
-      setStatusMessage('Connected to Anytype.');
+      setStatusMessage(
+        message ||
+          (syncedSettings.targetSpaceId
+          ? 'Connected to Anytype.'
+          : 'Connected to Anytype. Choose a target Space to continue.'),
+      );
       setCode('');
     } else {
       setStatusMessage(formatMessage(result.message, result.status, result.statusText));
@@ -96,6 +111,66 @@ function App() {
 
     setBusyLabel('');
   }
+
+  async function refreshSpaces(baseSettings: AnytypeConnectionSettings) {
+    const result = (await browser.runtime.sendMessage({
+      type: 'anytype:list-spaces',
+      payload: baseSettings,
+    })) as {
+      ok: boolean;
+      message: string;
+      spaces?: AnytypeSpace[];
+      status?: number;
+      statusText?: string;
+    };
+
+    if (!result.ok) {
+      setSpaces([]);
+      return {
+        settings: baseSettings,
+        message: formatMessage(result.message, result.status, result.statusText),
+      };
+    }
+
+    return {
+      settings: await syncSpaces(baseSettings, result.spaces ?? []),
+      message: '',
+    };
+  }
+
+  async function syncSpaces(
+    baseSettings: AnytypeConnectionSettings,
+    nextSpaces: AnytypeSpace[],
+  ) {
+    setSpaces(nextSpaces);
+
+    const hasSavedSpace = nextSpaces.some((space) => space.id === baseSettings.targetSpaceId);
+    const nextTargetSpaceId = hasSavedSpace ? baseSettings.targetSpaceId : (nextSpaces[0]?.id ?? '');
+
+    if (nextTargetSpaceId === baseSettings.targetSpaceId) {
+      return baseSettings;
+    }
+
+    const nextSettings = {
+      ...baseSettings,
+      targetSpaceId: nextTargetSpaceId,
+    };
+    await saveConnectionSettings(nextSettings);
+    return nextSettings;
+  }
+
+  async function handleTargetSpaceChange(targetSpaceId: string) {
+    const nextSettings = {
+      ...settings,
+      targetSpaceId,
+    };
+
+    setSettings(nextSettings);
+    await saveConnectionSettings(nextSettings);
+    setStatusMessage('Connected to Anytype.');
+  }
+
+  const selectedSpace = spaces.find((space) => space.id === settings.targetSpaceId);
 
   return (
     <main className="app-shell">
@@ -134,7 +209,29 @@ function App() {
       ) : null}
 
       {viewState === 'connected' ? (
-        <p className="meta success">Anytype is connected.</p>
+        <>
+          <label className="field">
+            <span>Target Space</span>
+            <select
+              value={settings.targetSpaceId}
+              onChange={(event) => void handleTargetSpaceChange(event.target.value)}>
+              {spaces.length === 0 ? (
+                <option value="">No spaces available</option>
+              ) : null}
+              {spaces.map((space) => (
+                <option key={space.id} value={space.id}>
+                  {space.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <p className="meta success">
+            {selectedSpace
+              ? `Anytype is connected. Imports will go to ${selectedSpace.name}.`
+              : 'Anytype is connected.'}
+          </p>
+        </>
       ) : null}
     </main>
   );

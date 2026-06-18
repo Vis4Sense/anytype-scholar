@@ -2,7 +2,9 @@ import {
   ANYTYPE_API_VERSION,
   type AnytypeApiKeyResult,
   type AnytypeChallengeResult,
+  type AnytypeConnectionCheckResult,
   type AnytypeConnectionSettings,
+  type AnytypeSpace,
   normalizeConnectionSettings,
 } from '@/lib/anytype';
 
@@ -22,6 +24,10 @@ type AnytypeMessage =
         challengeId: string;
         code: string;
       };
+    }
+  | {
+      type: 'anytype:list-spaces';
+      payload: AnytypeConnectionSettings;
     };
 
 export default defineBackground(() => {
@@ -42,11 +48,17 @@ export default defineBackground(() => {
       );
     }
 
+    if (message?.type === 'anytype:list-spaces') {
+      return listSpaces(message.payload);
+    }
+
     return undefined;
   });
 });
 
-async function checkConnection(payload: AnytypeConnectionSettings) {
+async function checkConnection(
+  payload: AnytypeConnectionSettings,
+): Promise<AnytypeConnectionCheckResult> {
   const settings = normalizeConnectionSettings(payload);
 
   if (!settings.apiToken) {
@@ -57,20 +69,56 @@ async function checkConnection(payload: AnytypeConnectionSettings) {
   }
 
   try {
-    const response = await fetch(`${settings.baseUrl}/v1/spaces`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${settings.apiToken}`,
-      },
-    });
+    const response = await fetchSpacesResponse(settings);
+    const data = await safeJson(response);
 
     return {
       ok: response.ok,
+      spaces: response.ok ? extractSpaces(data) : undefined,
       status: response.status,
       statusText: response.statusText,
       message: response.ok
         ? 'Connected to Anytype.'
         : 'Saved credentials are not working.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Failed to reach the local Anytype API.',
+    };
+  }
+}
+
+async function listSpaces(payload: AnytypeConnectionSettings): Promise<{
+  ok: boolean;
+  message: string;
+  spaces?: AnytypeSpace[];
+  status?: number;
+  statusText?: string;
+}> {
+  const settings = normalizeConnectionSettings(payload);
+
+  if (!settings.apiToken) {
+    return {
+      ok: false,
+      message: 'No API key saved yet.',
+    };
+  }
+
+  try {
+    const response = await fetchSpacesResponse(settings);
+    const data = await safeJson(response);
+    const spaces = extractSpaces(data);
+
+    return {
+      ok: response.ok,
+      spaces,
+      status: response.status,
+      statusText: response.statusText,
+      message: response.ok ? 'Spaces loaded.' : 'Failed to load spaces.',
     };
   } catch (error) {
     return {
@@ -199,4 +247,60 @@ async function safeJson(response: Response): Promise<unknown | null> {
   } catch {
     return null;
   }
+}
+
+function fetchSpacesResponse(settings: AnytypeConnectionSettings) {
+  return fetch(`${settings.baseUrl}/v1/spaces`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${settings.apiToken}`,
+    },
+  });
+}
+
+function extractSpaces(data: unknown): AnytypeSpace[] {
+  const candidates = Array.isArray(data)
+    ? data
+    : Array.isArray((data as { spaces?: unknown })?.spaces)
+      ? (data as { spaces: unknown[] }).spaces
+      : Array.isArray((data as { data?: unknown })?.data)
+        ? (data as { data: unknown[] }).data
+        : [];
+
+  return candidates
+    .map((space) => normalizeSpace(space))
+    .filter((space): space is AnytypeSpace => Boolean(space));
+}
+
+function normalizeSpace(value: unknown): AnytypeSpace | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const id =
+    typeof candidate.id === 'string'
+      ? candidate.id
+      : typeof candidate.space_id === 'string'
+        ? candidate.space_id
+        : typeof candidate.spaceId === 'string'
+          ? candidate.spaceId
+          : '';
+  const name =
+    typeof candidate.name === 'string'
+      ? candidate.name
+      : typeof candidate.title === 'string'
+        ? candidate.title
+        : typeof candidate.space_name === 'string'
+          ? candidate.space_name
+          : '';
+
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    name: name || 'Untitled Space',
+  };
 }

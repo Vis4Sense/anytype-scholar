@@ -55,11 +55,27 @@ h1 {
   background: #ffffff;
 }
 
+.field select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  color: #111111;
+  background: #ffffff;
+}
+
 .field input::placeholder {
   color: #9ca3af;
 }
 
 .field input:focus {
+  outline: none;
+  border-color: #111111;
+}
+
+.field select:focus {
   outline: none;
   border-color: #111111;
 }

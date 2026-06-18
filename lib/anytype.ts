@@ -2,6 +2,20 @@ export type AnytypeConnectionSettings = {
   baseUrl: string;
   apiToken: string;
   appName: string;
+  targetSpaceId: string;
+};
+
+export type AnytypeSpace = {
+  id: string;
+  name: string;
+};
+
+export type AnytypeConnectionCheckResult = {
+  ok: boolean;
+  message: string;
+  spaces?: AnytypeSpace[];
+  status?: number;
+  statusText?: string;
 };
 
 export type AnytypeChallengeResult = {
@@ -26,6 +40,7 @@ export const DEFAULT_CONNECTION_SETTINGS: AnytypeConnectionSettings = {
   baseUrl: 'http://127.0.0.1:31009',
   apiToken: '',
   appName: 'Anytype Scholar',
+  targetSpaceId: '',
 };
 
 export const STORAGE_KEY = 'anytype-connection-settings';
@@ -55,6 +70,7 @@ export function normalizeConnectionSettings(
     baseUrl: settings.baseUrl.trim().replace(/\/+$/, ''),
     apiToken: settings.apiToken.trim(),
     appName: settings.appName.trim() || DEFAULT_CONNECTION_SETTINGS.appName,
+    targetSpaceId: settings.targetSpaceId.trim(),
   };
 }
 
@@ -67,6 +83,7 @@ function isConnectionSettings(value: unknown): value is AnytypeConnectionSetting
   return (
     typeof candidate.baseUrl === 'string' &&
     typeof candidate.apiToken === 'string' &&
-    typeof candidate.appName === 'string'
+    typeof candidate.appName === 'string' &&
+    typeof candidate.targetSpaceId === 'string'
   );
 }
