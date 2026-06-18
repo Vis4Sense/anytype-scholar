@@ -1,52 +1,26 @@
-:root {
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  color: #111111;
-  background: #ffffff;
+@import "tailwindcss";
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
+@theme {
+  --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: auto;
-  background: #ffffff;
-}
+@layer base {
+  :root {
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+    color: #111111;
+    background: #ffffff;
+  }
 
-button {
-  border-radius: 10px;
-  border: 1px solid #111111;
-  padding: 0.7em 1em;
-  font-size: 0.95em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #ffffff;
-  background-color: #111111;
-  cursor: pointer;
-  transition:
-    background-color 0.2s ease,
-    opacity 0.2s ease;
-}
-button:hover {
-  background-color: #222222;
-}
-button:focus,
-button:focus-visible {
-  outline: 2px solid #9ca3af;
-  outline-offset: 1px;
-}
-
-button:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
-
-button:not(:disabled):active {
-  opacity: 0.92;
+  body {
+    margin: 0;
+    min-width: 20rem;
+    min-height: auto;
+    background: #ffffff;
+    color: #111111;
+    font-family: var(--font-sans);
+  }
 }

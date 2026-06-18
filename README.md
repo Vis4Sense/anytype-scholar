@@ -14,6 +14,7 @@ This project is not a native Anytype plugin in the traditional sense. The curren
 - connect to the local Anytype API
 - choose a target Space
 - parse paper metadata into a `Paper`-like object
+- use `citationKey` as the default object name when available
 - deduplicate obvious repeats before import
 - show a simple import result
 - leave room for future quick-save and paper-page capture flows
@@ -38,4 +39,7 @@ Type-check the project:
 pnpm compile
 ```
 
-More product notes: [docs/0_mvp.md](/Users/yuhanguo/yuhan/codes/anytype-scholar/docs/0_mvp.md)
+More product notes:
+
+- [docs/mvp.md](/Users/yuhanguo/yuhan/codes/anytype-scholar/docs/mvp.md)
+- [docs/data_model.md](/Users/yuhanguo/yuhan/codes/anytype-scholar/docs/data_model.md)

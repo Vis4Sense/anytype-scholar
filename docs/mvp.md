@@ -33,14 +33,15 @@ Core MVP flow:
 
 ## Suggested field mapping
 
-- `title` -> object name
+- `citation key` -> object name
+- `title` -> full title property
 - `author` -> author text
 - `year` -> publication year
 - `journal` / `booktitle` -> venue
 - `doi` -> DOI
 - `url` -> source URL
 - `abstract` -> notes or body
-- `citation key` -> citation key
+- `citation key` -> citation key property
 - `keywords` -> tags or text
 - `raw BibTeX` -> original BibTeX field
 
