@@ -2,6 +2,7 @@ import type {
   AnytypeConnectionSettings,
   AnytypeProperty,
   AnytypeSpace,
+  AnytypeTemplate,
   AnytypeType,
 } from '@/lib/anytype';
 
@@ -19,6 +20,7 @@ type TargetSetupPanelProps = {
   settings: AnytypeConnectionSettings;
   spaces: AnytypeSpace[];
   types: AnytypeType[];
+  templates: AnytypeTemplate[];
   selectedTypeName: string;
   busyLabel: string;
   isCreatingType: boolean;
@@ -35,6 +37,7 @@ type TargetSetupPanelProps = {
   inlineButtonClass: string;
   onTargetSpaceChange: (value: string) => void;
   onTargetTypeChange: (value: string) => void;
+  onTargetTemplateChange: (value: string) => void;
   onToggleCreateType: () => void;
   onNewTypeNameChange: (value: string) => void;
   onCreateType: () => void;
@@ -46,6 +49,7 @@ export function TargetSetupPanel({
   settings,
   spaces,
   types,
+  templates,
   selectedTypeName,
   busyLabel,
   isCreatingType,
@@ -62,6 +66,7 @@ export function TargetSetupPanel({
   inlineButtonClass,
   onTargetSpaceChange,
   onTargetTypeChange,
+  onTargetTemplateChange,
   onToggleCreateType,
   onNewTypeNameChange,
   onCreateType,
@@ -109,6 +114,22 @@ export function TargetSetupPanel({
                 + New
               </button>
             </div>
+
+            <label className="contents">
+              <span className="text-xs font-medium text-zinc-700">Target Template</span>
+              <select
+                className={compactSelectClass}
+                value={settings.targetTemplateId}
+                onChange={(event) => onTargetTemplateChange(event.target.value)}>
+                <option value="">No template</option>
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.icon ? `${template.icon} ` : ''}
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             {isCreatingType ? (
               <div className="col-start-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2.5">

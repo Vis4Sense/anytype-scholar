@@ -94,7 +94,9 @@ export async function importBibtex(
     const createResult = await createObject(settings, {
       name: displayName,
       properties: buildObjectProperties(entry, propertyMap),
-      bodyMarkdown: buildInitialBody(entry, displayName),
+      bodyMarkdown: settings.targetTemplateId
+        ? undefined
+        : buildInitialBody(entry, displayName),
     });
 
     if (!createResult.ok) {

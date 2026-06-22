@@ -10,6 +10,7 @@ import {
   type AnytypeImportResult,
   type AnytypeProperty,
   type AnytypeSpace,
+  type AnytypeTemplate,
   type AnytypeType,
   type AnytypeTypeDetail,
   REQUIRED_PAPER_PROPERTIES,
@@ -50,6 +51,7 @@ function App() {
   const [code, setCode] = useState('');
   const [spaces, setSpaces] = useState<AnytypeSpace[]>([]);
   const [types, setTypes] = useState<AnytypeType[]>([]);
+  const [templates, setTemplates] = useState<AnytypeTemplate[]>([]);
   const [properties, setProperties] = useState<AnytypeProperty[]>([]);
   const [selectedTypeDetail, setSelectedTypeDetail] = useState<AnytypeTypeDetail | null>(
     null,
@@ -189,6 +191,7 @@ function App() {
   async function refreshSchema(baseSettings: AnytypeConnectionSettings) {
     if (!baseSettings.targetSpaceId) {
       setTypes([]);
+      setTemplates([]);
       setProperties([]);
       setSelectedTypeDetail(null);
       return;
@@ -232,10 +235,12 @@ function App() {
       baseSettings.targetTypeId &&
       (typesResult.types ?? []).some((type) => type.id === baseSettings.targetTypeId)
     ) {
+      await refreshTemplates(baseSettings);
       await refreshSelectedType(baseSettings, baseSettings.targetTypeId);
       return;
     }
 
+    setTemplates([]);
     setSelectedTypeDetail(null);
   }
 
@@ -255,6 +260,8 @@ function App() {
     const nextSettings = {
       ...baseSettings,
       targetSpaceId: nextTargetSpaceId,
+      targetTypeId: hasSavedSpace ? baseSettings.targetTypeId : '',
+      targetTemplateId: hasSavedSpace ? baseSettings.targetTemplateId : '',
     };
     await saveConnectionSettings(nextSettings);
     return nextSettings;
@@ -265,6 +272,7 @@ function App() {
       ...settings,
       targetSpaceId,
       targetTypeId: '',
+      targetTemplateId: '',
     };
 
     setSettings(nextSettings);
@@ -281,14 +289,28 @@ function App() {
     const nextSettings = {
       ...settings,
       targetTypeId,
+      targetTemplateId: '',
       targetTypeMode: 'existing' as const,
     };
 
     setSettings(nextSettings);
+    setTemplates([]);
     resetSetupMessages();
     setImportResult(null);
     await saveConnectionSettings(nextSettings);
+    await refreshTemplates(nextSettings);
     await refreshSelectedType(nextSettings, targetTypeId);
+  }
+
+  async function handleTargetTemplateChange(targetTemplateId: string) {
+    const nextSettings = {
+      ...settings,
+      targetTemplateId,
+    };
+
+    setSettings(nextSettings);
+    setImportResult(null);
+    await saveConnectionSettings(nextSettings);
   }
 
   async function handleCreateType() {
@@ -331,6 +353,7 @@ function App() {
     const nextSettings = {
       ...settings,
       targetTypeId: result.type.id,
+      targetTemplateId: '',
       targetTypeMode: 'existing' as const,
     };
 
@@ -460,6 +483,44 @@ function App() {
     setSelectedTypeDetail(result.type ?? null);
     setSelectedTypeDetailTypeId(typeId);
     setSelectedTypeDetailLoading(false);
+  }
+
+  async function refreshTemplates(baseSettings: AnytypeConnectionSettings) {
+    if (!baseSettings.targetTypeId) {
+      setTemplates([]);
+      return;
+    }
+
+    const result = (await browser.runtime.sendMessage({
+      type: 'anytype:list-templates',
+      payload: baseSettings,
+    })) as {
+      ok: boolean;
+      message: string;
+      templates?: AnytypeTemplate[];
+      status?: number;
+      statusText?: string;
+    };
+
+    if (!result.ok) {
+      setTemplates([]);
+      return;
+    }
+
+    const nextTemplates = result.templates ?? [];
+    setTemplates(nextTemplates);
+
+    if (
+      baseSettings.targetTemplateId &&
+      !nextTemplates.some((template) => template.id === baseSettings.targetTemplateId)
+    ) {
+      const nextSettings = {
+        ...baseSettings,
+        targetTemplateId: '',
+      };
+      setSettings(nextSettings);
+      await saveConnectionSettings(nextSettings);
+    }
   }
 
   function handleParseBibtex() {
@@ -663,6 +724,7 @@ function App() {
             settings={settings}
             spaces={spaces}
             types={types}
+            templates={templates}
             selectedTypeName={selectedType?.name ?? ''}
             busyLabel={busyLabel}
             isCreatingType={isCreatingType}
@@ -679,6 +741,7 @@ function App() {
             inlineButtonClass={inlineButtonClass}
             onTargetSpaceChange={(value) => void handleTargetSpaceChange(value)}
             onTargetTypeChange={(value) => void handleTargetTypeChange(value)}
+            onTargetTemplateChange={(value) => void handleTargetTemplateChange(value)}
             onToggleCreateType={() => {
               setIsCreatingType((value) => !value);
               setNewTypeName('');

@@ -7,6 +7,7 @@ import {
   type AnytypeObjectPropertyValue,
   type AnytypeProperty,
   type AnytypeSpace,
+  type AnytypeTemplate,
   type AnytypeType,
   type AnytypeTypeDetail,
   REQUIRED_PAPER_PROPERTIES,
@@ -16,6 +17,7 @@ import {
   extractApiErrorMessage,
   extractProperties,
   extractSpaces,
+  extractTemplates,
   extractTypes,
   normalizeProperty,
   normalizePropertyKey,
@@ -172,6 +174,50 @@ export async function listProperties(payload: AnytypeConnectionSettings): Promis
       status: response.status,
       statusText: response.statusText,
       message: response.ok ? 'Properties loaded.' : 'Failed to load properties.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+    };
+  }
+}
+
+export async function listTemplates(payload: AnytypeConnectionSettings): Promise<{
+  ok: boolean;
+  message: string;
+  templates?: AnytypeTemplate[];
+  status?: number;
+  statusText?: string;
+}> {
+  const settings = normalizeConnectionSettings(payload);
+
+  if (!settings.apiToken || !settings.targetSpaceId || !settings.targetTypeId) {
+    return {
+      ok: false,
+      message: 'A connected Anytype type is required.',
+    };
+  }
+
+  try {
+    const response = await fetch(
+      `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/types/${settings.targetTypeId}/templates`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${settings.apiToken}`,
+        },
+      },
+    );
+    const data = await safeJson(response);
+
+    return {
+      ok: response.ok,
+      templates: extractTemplates(data),
+      status: response.status,
+      statusText: response.statusText,
+      message: response.ok ? 'Templates loaded.' : 'Failed to load templates.',
     };
   } catch (error) {
     return {
@@ -595,12 +641,14 @@ export async function createObject(
     {
       body: input.bodyMarkdown,
       name: trimmedName,
+      template_id: settings.targetTemplateId || undefined,
       type_key: typeKey,
       properties: input.properties,
     },
     {
       body: input.bodyMarkdown,
       name: trimmedName,
+      template_id: settings.targetTemplateId || undefined,
       typeKey,
       properties: input.properties,
     },
@@ -630,14 +678,6 @@ export async function createObject(
             (data as { data?: unknown } | null)?.data ??
             data,
         );
-
-        if (createdObject?.id) {
-          await updateObject(settings, createdObject.id, {
-            name: trimmedName,
-            properties: input.properties,
-            bodyMarkdown: input.bodyMarkdown,
-          });
-        }
 
         return {
           ok: true,
@@ -814,30 +854,59 @@ async function updateObject(
     {
       name: input.name,
       properties: input.properties,
+      markdown: input.bodyMarkdown,
+    },
+    {
+      name: input.name,
+      properties: input.properties,
       body: input.bodyMarkdown,
+    },
+    {
+      name: input.name,
+      properties: input.properties,
+      body_markdown: input.bodyMarkdown,
+    },
+    {
+      name: input.name,
+      properties: input.properties,
+      bodyMarkdown: input.bodyMarkdown,
     },
     {
       details: input.properties,
       body: input.bodyMarkdown,
     },
     {
+      details: input.properties,
+      body_markdown: input.bodyMarkdown,
+    },
+    {
+      details: input.properties,
+      bodyMarkdown: input.bodyMarkdown,
+    },
+    {
       body: input.bodyMarkdown,
+    },
+    {
+      body_markdown: input.bodyMarkdown,
+    },
+    {
+      bodyMarkdown: input.bodyMarkdown,
+    },
+    {
+      markdown: input.bodyMarkdown,
     },
   ];
 
   for (const body of attempts) {
     try {
-      const response = await fetch(
-        `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects/${objectId}`,
-        {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${settings.apiToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(body),
+      const response = await fetch(`${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects/${objectId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${settings.apiToken}`,
+          'Content-Type': 'application/json',
         },
-      );
+        body: JSON.stringify(body),
+      });
 
       if (response.ok) {
         return;
@@ -846,6 +915,14 @@ async function updateObject(
       return;
     }
   }
+}
+
+function trimBody(value: string) {
+  return value.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function normalizeBodyForCompare(value: string | null | undefined) {
+  return typeof value === 'string' ? value.replace(/\r\n/g, '\n').trim() : '';
 }
 
 function extractObjects(data: unknown): AnytypeObjectSummary[] {

@@ -7,6 +7,7 @@ import {
   getType,
   listProperties,
   listSpaces,
+  listTemplates,
   listTypes,
 } from '@/lib/anytype-client';
 import { importBibtex } from '@/lib/anytype-import';
@@ -39,6 +40,10 @@ type AnytypeMessage =
     }
   | {
       type: 'anytype:list-properties';
+      payload: AnytypeConnectionSettings;
+    }
+  | {
+      type: 'anytype:list-templates';
       payload: AnytypeConnectionSettings;
     }
   | {
@@ -99,6 +104,10 @@ export default defineBackground(() => {
 
     if (message?.type === 'anytype:list-properties') {
       return listProperties(message.payload);
+    }
+
+    if (message?.type === 'anytype:list-templates') {
+      return listTemplates(message.payload);
     }
 
     if (message?.type === 'anytype:get-type') {

@@ -4,6 +4,7 @@ export type AnytypeConnectionSettings = {
   appName: string;
   targetSpaceId: string;
   targetTypeId: string;
+  targetTemplateId: string;
   targetTypeMode: 'new-paper' | 'existing';
 };
 
@@ -16,6 +17,12 @@ export type AnytypeType = {
   id: string;
   key: string;
   name: string;
+};
+
+export type AnytypeTemplate = {
+  id: string;
+  name: string;
+  icon?: string;
 };
 
 export type AnytypeProperty = {
@@ -102,6 +109,7 @@ export const DEFAULT_CONNECTION_SETTINGS: AnytypeConnectionSettings = {
   appName: 'Anytype Scholar',
   targetSpaceId: '',
   targetTypeId: '',
+  targetTemplateId: '',
   targetTypeMode: 'new-paper',
 };
 
@@ -134,6 +142,7 @@ export function normalizeConnectionSettings(
     appName: settings.appName.trim() || DEFAULT_CONNECTION_SETTINGS.appName,
     targetSpaceId: settings.targetSpaceId.trim(),
     targetTypeId: settings.targetTypeId.trim(),
+    targetTemplateId: settings.targetTemplateId.trim(),
     targetTypeMode:
       settings.targetTypeMode === 'existing' ? 'existing' : 'new-paper',
   };
@@ -151,6 +160,7 @@ function isConnectionSettings(value: unknown): value is AnytypeConnectionSetting
     typeof candidate.appName === 'string' &&
     typeof candidate.targetSpaceId === 'string' &&
     typeof candidate.targetTypeId === 'string' &&
+    typeof candidate.targetTemplateId === 'string' &&
     (candidate.targetTypeMode === 'new-paper' ||
       candidate.targetTypeMode === 'existing')
   );

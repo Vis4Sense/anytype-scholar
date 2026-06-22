@@ -1,6 +1,7 @@
 import type {
   AnytypeProperty,
   AnytypeSpace,
+  AnytypeTemplate,
   AnytypeType,
   AnytypeTypeDetail,
 } from '@/lib/anytype';
@@ -109,6 +110,60 @@ export function normalizeType(value: unknown): AnytypeType | null {
     id,
     key: key || id,
     name: name || key || 'Untitled Type',
+  };
+}
+
+export function extractTemplates(data: unknown): AnytypeTemplate[] {
+  const candidates = Array.isArray(data)
+    ? data
+    : Array.isArray((data as { templates?: unknown })?.templates)
+      ? (data as { templates: unknown[] }).templates
+      : Array.isArray((data as { data?: unknown })?.data)
+        ? (data as { data: unknown[] }).data
+        : [];
+
+  return candidates
+    .map((template) => normalizeTemplate(template))
+    .filter((template): template is AnytypeTemplate => Boolean(template));
+}
+
+export function normalizeTemplate(value: unknown): AnytypeTemplate | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const id =
+    typeof candidate.id === 'string'
+      ? candidate.id
+      : typeof candidate.template_id === 'string'
+        ? candidate.template_id
+        : typeof candidate.templateId === 'string'
+          ? candidate.templateId
+          : '';
+  const name =
+    typeof candidate.name === 'string'
+      ? candidate.name
+      : typeof candidate.title === 'string'
+        ? candidate.title
+        : '';
+  const icon =
+    typeof candidate.icon === 'string'
+      ? candidate.icon
+      : typeof candidate.emoji_icon === 'string'
+        ? candidate.emoji_icon
+        : typeof candidate.emojiIcon === 'string'
+          ? candidate.emojiIcon
+          : undefined;
+
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    name: name || 'Untitled Template',
+    icon,
   };
 }
 
