@@ -27,6 +27,7 @@ type SchemaMapping = {
 type TargetSetupPanelProps = {
   settings: AnytypeConnectionSettings;
   properties: AnytypeProperty[];
+  typeProperties: AnytypeProperty[];
   spaces: AnytypeSpace[];
   types: AnytypeType[];
   templates: AnytypeTemplate[];
@@ -61,6 +62,7 @@ type TargetSetupPanelProps = {
 export function TargetSetupPanel({
   settings,
   properties,
+  typeProperties,
   spaces,
   types,
   templates,
@@ -133,6 +135,30 @@ export function TargetSetupPanel({
               </button>
             </div>
 
+            {isCreatingType ? (
+              <div className="col-span-2 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2.5">
+                <div aria-hidden="true" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2.5 py-0.5 text-xs text-zinc-950 outline-none transition focus:border-zinc-950"
+                      placeholder="Paper"
+                      type="text"
+                      value={newTypeName}
+                      onChange={(event) => onNewTypeNameChange(event.target.value)}
+                    />
+                    <button
+                      className={compactInlineButtonClass}
+                      disabled={Boolean(busyLabel) || !newTypeName.trim()}
+                      type="button"
+                      onClick={onCreateType}>
+                      Create
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <label className="contents">
               <span className="text-xs font-medium text-zinc-700">Target Template</span>
               <select
@@ -148,27 +174,6 @@ export function TargetSetupPanel({
                 ))}
               </select>
             </label>
-
-            {isCreatingType ? (
-              <div className="col-start-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2.5">
-                <div className="flex items-center gap-2">
-                  <input
-                    className="min-w-0 flex-1 rounded-xl border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-950 outline-none transition focus:border-zinc-950"
-                    placeholder="Paper"
-                    type="text"
-                    value={newTypeName}
-                    onChange={(event) => onNewTypeNameChange(event.target.value)}
-                  />
-                  <button
-                    className={inlineButtonClass}
-                    disabled={Boolean(busyLabel) || !newTypeName.trim()}
-                    type="button"
-                    onClick={onCreateType}>
-                    Create
-                  </button>
-                </div>
-              </div>
-            ) : null}
 
             {typeActionMessage ? (
               <p
@@ -203,7 +208,7 @@ export function TargetSetupPanel({
               <PropertyOverrideRow
                 key={`${index}-${override.propertyName}`}
                 override={override}
-                property={findMatchingProperty(properties, override.propertyName)}
+                property={findMatchingProperty(typeProperties, override.propertyName)}
                 onPropertyNameChange={(value) =>
                   onOverridePropertyNameChange(index, value)
                 }
@@ -288,51 +293,62 @@ function PropertyOverrideRow({
   onRemove,
   onValueChange,
 }: PropertyOverrideRowProps) {
-  const formatMeta = getPropertyFormatMeta(property?.format);
+  const formatMeta = getPropertyFormatMeta(property?.format, override.value);
+  const matchState = property
+    ? {
+        iconClassName: 'text-sky-600',
+        statusLabel: `Matched property key: ${property.key}`,
+      }
+    : {
+        iconClassName: 'text-zinc-400',
+        statusLabel: 'No matching property key found.',
+      };
 
   return (
-    <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
-      <Icon
-        icon={formatMeta.icon}
-        className="shrink-0 text-xs text-zinc-500"
-        aria-hidden="true"
-      />
-      <input
-        className="min-w-0 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-950 outline-none transition focus:border-zinc-950"
-        placeholder="Resource Type"
-        type="text"
-        value={override.propertyName}
-        onChange={(event) => onPropertyNameChange(event.target.value)}
-      />
-      <input
-        className="min-w-0 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-950 outline-none transition focus:border-zinc-950"
-        placeholder="paper"
-        type="text"
-        value={override.value}
-        onChange={(event) => onValueChange(event.target.value)}
-      />
-      <button
-        className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 transition hover:text-zinc-950"
-        type="button"
-        onClick={onRemove}
-        aria-label="Remove property override">
-        <Icon icon={xIcon} className="text-sm" aria-hidden="true" />
-      </button>
+    <div className="space-y-1">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
+        <span className="shrink-0" title={matchState.statusLabel}>
+          <Icon
+            icon={formatMeta.icon}
+            className={`text-xs ${matchState.iconClassName}`}
+            aria-hidden="true"
+          />
+        </span>
+        <input
+          className="min-w-0 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-950 outline-none transition focus:border-zinc-950"
+          placeholder="Resource Type"
+          type="text"
+          value={override.propertyName}
+          onChange={(event) => onPropertyNameChange(event.target.value)}
+          title={matchState.statusLabel}
+        />
+        <input
+          className="min-w-0 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-950 outline-none transition focus:border-zinc-950"
+          placeholder='["paper"]'
+          type="text"
+          value={override.value}
+          onChange={(event) => onValueChange(event.target.value)}
+        />
+        <button
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 transition hover:text-zinc-950"
+          type="button"
+          onClick={onRemove}
+          aria-label="Remove property override">
+          <Icon icon={xIcon} className="text-sm" aria-hidden="true" />
+        </button>
+      </div>
     </div>
   );
 }
 
 function findMatchingProperty(properties: AnytypeProperty[], propertyName: string) {
   const normalized = normalizePropertyName(propertyName);
-  return properties.find(
-    (property) =>
-      normalizePropertyName(property.key) === normalized ||
-      normalizePropertyName(property.name) === normalized,
-  );
+  return properties.find((property) => normalizePropertyName(property.name) === normalized);
 }
 
-function getPropertyFormatMeta(format?: string) {
+function getPropertyFormatMeta(format?: string, overrideValue?: string) {
   const normalized = normalizePropertyName(format ?? '');
+  const looksLikeListValue = isJsonStringList(overrideValue);
 
   if (normalized === 'number') {
     return {
@@ -351,7 +367,8 @@ function getPropertyFormatMeta(format?: string) {
   if (
     normalized.includes('select') ||
     normalized.includes('tag') ||
-    normalized.includes('status')
+    normalized.includes('status') ||
+    (!normalized && looksLikeListValue)
   ) {
     return {
       icon: tagsIcon,
@@ -370,6 +387,21 @@ function getPropertyFormatMeta(format?: string) {
     icon: infoIcon,
     label: format || 'unmatched',
   };
+}
+
+function isJsonStringList(value?: string) {
+  const trimmedValue = value?.trim() ?? '';
+
+  if (!trimmedValue.startsWith('[') || !trimmedValue.endsWith(']')) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmedValue);
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === 'string');
+  } catch {
+    return false;
+  }
 }
 
 function normalizePropertyName(value: string) {

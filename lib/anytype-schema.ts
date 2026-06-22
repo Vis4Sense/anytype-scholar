@@ -10,7 +10,7 @@ import {
   listProperties,
   updateTypeProperties,
 } from '@/lib/anytype-client';
-import { normalizePropertyKey, normalizePropertyName } from '@/lib/anytype-normalize';
+import { normalizePropertyKey } from '@/lib/anytype-normalize';
 
 export async function preparePaperType(
   payload: AnytypeConnectionSettings,
@@ -130,10 +130,7 @@ function propertyMatchesRequired(
   property: AnytypeProperty,
   requiredProperty: (typeof REQUIRED_PAPER_PROPERTIES)[number],
 ) {
-  return (
-    normalizePropertyKey(property.key) === normalizePropertyKey(requiredProperty.key) ||
-    normalizePropertyName(property.name) === normalizePropertyName(requiredProperty.name)
-  );
+  return normalizePropertyKey(property.key) === normalizePropertyKey(requiredProperty.key);
 }
 
 function mergeTypeProperties(

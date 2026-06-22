@@ -400,10 +400,7 @@ function App() {
 
     if (schemaResult.ok) {
       setSelectedTypeDetail(schemaResult.type ?? null);
-      setTypeActionMessage({
-        kind: 'success',
-        text: `${result.type.name} is ready.`,
-      });
+      setTypeActionMessage(null);
       setSchemaActionMessage(null);
     } else {
       setTypeActionMessage({
@@ -456,10 +453,7 @@ function App() {
     setSelectedTypeDetail(result.type ?? null);
     await refreshSchema(settings);
     setSchemaExpanded(false);
-    setSchemaActionMessage({
-      kind: 'success',
-      text: 'Schema is ready.',
-    });
+    setSchemaActionMessage(null);
     setBusyLabel('');
   }
 
@@ -607,6 +601,11 @@ function App() {
       },
     })) as AnytypeImportResult;
 
+    console.info('[Anytype Import][Popup] Result', result);
+    for (const entry of result.debug ?? []) {
+      console.info(`[Anytype Import][Popup] ${entry.label}`, entry.data);
+    }
+
     setImportResult(result);
     setBusyLabel('');
   }
@@ -622,18 +621,13 @@ function App() {
   const selectedSpace = spaces.find((space) => space.id === settings.targetSpaceId);
   const selectedType = types.find((type) => type.id === settings.targetTypeId);
   const availablePropertyKeys = new Set(
-    properties.flatMap((property) => [
-      normalizePropertyName(property.key),
-      normalizePropertyName(property.name),
-    ]),
+    properties.map((property) => normalizePropertyName(property.key)),
   );
   const attachedPropertyKeys = new Set(
     selectedTypeDetail?.propertyKeys.map((key) => normalizePropertyName(key)) ?? [],
   );
   const missingSpaceProperties = REQUIRED_PAPER_PROPERTIES.filter(
-    (property) =>
-      !availablePropertyKeys.has(normalizePropertyName(property.key)) &&
-      !availablePropertyKeys.has(normalizePropertyName(property.name)),
+    (property) => !availablePropertyKeys.has(normalizePropertyName(property.key)),
   );
   const missingTypeProperties =
     settings.targetTypeMode === 'existing' &&
@@ -641,10 +635,7 @@ function App() {
     selectedTypeDetailTypeId === settings.targetTypeId &&
     selectedTypeDetail
       ? REQUIRED_PAPER_PROPERTIES.filter((property) => {
-          const presentOnType =
-            attachedPropertyKeys.has(normalizePropertyName(property.key)) ||
-            attachedPropertyKeys.has(normalizePropertyName(property.name));
-          return !presentOnType;
+          return !attachedPropertyKeys.has(normalizePropertyName(property.key));
         })
       : [];
   const schemaExamples = missingTypeProperties
@@ -655,9 +646,7 @@ function App() {
     const existingProperty = properties.find(
       (availableProperty) =>
         normalizePropertyName(availableProperty.key) ===
-          normalizePropertyName(property.key) ||
-        normalizePropertyName(availableProperty.name) ===
-          normalizePropertyName(property.name),
+        normalizePropertyName(property.key),
     );
 
     return {
@@ -743,6 +732,7 @@ function App() {
           <TargetSetupPanel
             settings={settings}
             properties={properties}
+            typeProperties={selectedTypeDetail?.properties ?? []}
             spaces={spaces}
             types={types}
             templates={templates}

@@ -3,6 +3,7 @@ import {
   type AnytypeApiKeyResult,
   type AnytypeChallengeResult,
   type AnytypeConnectionCheckResult,
+  type AnytypeImportDebugEntry,
   type AnytypeConnectionSettings,
   type AnytypeObjectPropertyValue,
   type AnytypeProperty,
@@ -27,6 +28,8 @@ import {
   pluralizeTypeName,
   safeJson,
 } from '@/lib/anytype-normalize';
+
+type AnytypeDebugLogger = (entry: AnytypeImportDebugEntry) => void;
 
 export async function checkConnection(
   payload: AnytypeConnectionSettings,
@@ -167,6 +170,13 @@ export async function listProperties(payload: AnytypeConnectionSettings): Promis
       },
     );
     const data = await safeJson(response);
+    console.info('[Anytype Import] List properties response', {
+      endpoint: `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/properties`,
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      data,
+    });
 
     return {
       ok: response.ok,
@@ -258,6 +268,13 @@ export async function getType(
       },
     );
     const data = await safeJson(response);
+    console.info('[Anytype Import] Get type response', {
+      endpoint: `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/types/${typeId.trim()}`,
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      data,
+    });
     const normalizedTypeSource =
       (data as { type?: unknown } | null)?.type ??
       (data as { data?: unknown } | null)?.data ??
@@ -423,6 +440,10 @@ export async function createProperty(
   let lastData: unknown = null;
 
   for (const body of attempts) {
+    console.info('[Anytype Import] Create property request', {
+      endpoint: `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/properties`,
+      body,
+    });
     const response = await fetch(
       `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/properties`,
       {
@@ -440,6 +461,13 @@ export async function createProperty(
         (data as { data?: unknown } | null)?.data ??
         data,
     );
+    console.info('[Anytype Import] Create property response', {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      data,
+      normalizedProperty: createdProperty,
+    });
 
     if (response.ok && createdProperty) {
       return {
@@ -468,6 +496,7 @@ export async function createCustomProperty(
     key?: string;
     format?: string;
   },
+  debugLog?: AnytypeDebugLogger,
 ): Promise<{
   ok: boolean;
   message: string;
@@ -505,6 +534,15 @@ export async function createCustomProperty(
   let lastData: unknown = null;
 
   for (const body of attempts) {
+    const requestEntry = {
+      endpoint: `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/properties`,
+      body,
+    };
+    console.info('[Anytype Import] Create custom property request', requestEntry);
+    debugLog?.({
+      label: 'Create custom property request',
+      data: requestEntry,
+    });
     const response = await fetch(
       `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/properties`,
       {
@@ -522,6 +560,18 @@ export async function createCustomProperty(
         (data as { data?: unknown } | null)?.data ??
         data,
     );
+    const responseEntry = {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      data,
+      normalizedProperty: createdProperty,
+    };
+    console.info('[Anytype Import] Create custom property response', responseEntry);
+    debugLog?.({
+      label: 'Create custom property response',
+      data: responseEntry,
+    });
 
     if (response.ok && createdProperty) {
       return {
@@ -641,7 +691,6 @@ export async function listObjects(
   const endpoints = [
     `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects?type_id=${encodeURIComponent(settings.targetTypeId)}`,
     `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects?typeId=${encodeURIComponent(settings.targetTypeId)}`,
-    `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects`,
   ];
 
   let lastResponse: Response | null = null;
@@ -682,7 +731,9 @@ export async function listObjects(
     ok: false,
     status: lastResponse?.status,
     statusText: lastResponse?.statusText,
-    message: extractApiErrorMessage(lastData) || 'Failed to load existing objects.',
+    message:
+      extractApiErrorMessage(lastData) ||
+      'Failed to load existing objects for the selected type.',
   };
 }
 
@@ -693,6 +744,7 @@ export async function createObject(
     properties: AnytypeObjectPropertyValue[];
     bodyMarkdown?: string;
   },
+  debugLog?: AnytypeDebugLogger,
 ): Promise<{
   ok: boolean;
   message: string;
@@ -717,67 +769,76 @@ export async function createObject(
     };
   }
 
-  const typeKey = await resolveTargetTypeKey(settings);
+  const typeKey = await resolveTargetTypeKey(settings, debugLog);
 
-  const attempts = [
-    {
-      body: input.bodyMarkdown,
-      name: trimmedName,
-      template_id: settings.targetTemplateId || undefined,
-      type_key: typeKey,
-      properties: input.properties,
-    },
-    {
-      body: input.bodyMarkdown,
-      name: trimmedName,
-      template_id: settings.targetTemplateId || undefined,
-      typeKey,
-      properties: input.properties,
-    },
-  ];
+  const requestBody = {
+    body: input.bodyMarkdown,
+    name: trimmedName,
+    template_id: settings.targetTemplateId || undefined,
+    type_key: typeKey,
+    properties: input.properties,
+  };
 
   let lastResponse: Response | null = null;
   let lastData: unknown = null;
 
-  for (const body of attempts) {
-    try {
-      const response = await fetch(
-        `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${settings.apiToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(body),
+  try {
+    const requestEntry = {
+      endpoint: `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects`,
+      body: requestBody,
+    };
+    console.info('[Anytype Import] Create object request', requestEntry);
+    debugLog?.({
+      label: 'Create object request',
+      data: requestEntry,
+    });
+    const response = await fetch(
+      `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${settings.apiToken}`,
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify(requestBody),
+      },
+    );
+    const data = await safeJson(response);
+    const responseEntry = {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      data,
+    };
+    console.info('[Anytype Import] Create object response', responseEntry);
+    debugLog?.({
+      label: 'Create object response',
+      data: responseEntry,
+    });
+    if (response.ok) {
+      const createdObject = normalizeObject(
+        (data as { object?: unknown } | null)?.object ??
+          (data as { data?: unknown } | null)?.data ??
+          data,
       );
-      const data = await safeJson(response);
-      if (response.ok) {
-        const createdObject = normalizeObject(
-          (data as { object?: unknown } | null)?.object ??
-            (data as { data?: unknown } | null)?.data ??
-            data,
-        );
 
-        return {
-          ok: true,
-          object: createdObject,
-          status: response.status,
-          statusText: response.statusText,
-          message: 'Object created.',
-        };
-      }
-
-      lastResponse = response;
-      lastData = data;
-    } catch (error) {
       return {
-        ok: false,
-        message:
-          error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+        ok: true,
+        object: createdObject,
+        status: response.status,
+        statusText: response.statusText,
+        message: 'Object created.',
       };
     }
+
+    lastResponse = response;
+    lastData = data;
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : 'Failed to reach the local Anytype API.',
+    };
   }
 
   return {
@@ -902,24 +963,119 @@ function fetchSpacesResponse(settings: AnytypeConnectionSettings) {
   });
 }
 
-async function resolveTargetTypeKey(settings: AnytypeConnectionSettings) {
+async function resolveTargetTypeKey(
+  settings: AnytypeConnectionSettings,
+  debugLog?: AnytypeDebugLogger,
+) {
   if (!settings.targetTypeId.trim()) {
     return '';
   }
 
   const typeResult = await getType(settings, settings.targetTypeId);
+  const typeKeyDebug = {
+    targetTypeId: settings.targetTypeId,
+    getType: {
+      ok: typeResult.ok,
+      type: typeResult.type ?? null,
+      message: typeResult.message,
+      status: typeResult.status,
+      statusText: typeResult.statusText,
+    },
+  };
   if (typeResult.ok && typeResult.type?.key) {
+    const debugEntry = {
+      ...typeKeyDebug,
+      source: 'getType.key',
+      resolvedTypeKey: typeResult.type.key,
+    };
+    console.info('[Anytype Import] Resolve type key', debugEntry);
+    debugLog?.({
+      label: 'Resolve type key',
+      data: debugEntry,
+    });
     return typeResult.type.key;
+  }
+  if (typeResult.ok && typeResult.type?.name) {
+    const resolvedTypeKey = normalizeTypeKey(typeResult.type.name);
+    const debugEntry = {
+      ...typeKeyDebug,
+      source: 'getType.name',
+      resolvedTypeKey,
+    };
+    console.info('[Anytype Import] Resolve type key', debugEntry);
+    debugLog?.({
+      label: 'Resolve type key',
+      data: debugEntry,
+    });
+    return resolvedTypeKey;
   }
 
   const typesResult = await listTypes(settings);
   if (!typesResult.ok) {
+    const debugEntry = {
+      ...typeKeyDebug,
+      source: 'listTypes.error',
+      listTypes: {
+        ok: typesResult.ok,
+        message: typesResult.message,
+        status: typesResult.status,
+        statusText: typesResult.statusText,
+      },
+      resolvedTypeKey: '',
+    };
+    console.info('[Anytype Import] Resolve type key', debugEntry);
+    debugLog?.({
+      label: 'Resolve type key',
+      data: debugEntry,
+    });
     return '';
   }
 
-  return (
-    typesResult.types?.find((type) => type.id === settings.targetTypeId)?.key ?? ''
-  );
+  const matchedType = typesResult.types?.find((type) => type.id === settings.targetTypeId);
+
+  if (matchedType?.key) {
+    const debugEntry = {
+      ...typeKeyDebug,
+      source: 'listTypes.key',
+      matchedType,
+      resolvedTypeKey: matchedType.key,
+    };
+    console.info('[Anytype Import] Resolve type key', debugEntry);
+    debugLog?.({
+      label: 'Resolve type key',
+      data: debugEntry,
+    });
+    return matchedType.key;
+  }
+
+  if (matchedType?.name) {
+    const resolvedTypeKey = normalizeTypeKey(matchedType.name);
+    const debugEntry = {
+      ...typeKeyDebug,
+      source: 'listTypes.name',
+      matchedType,
+      resolvedTypeKey,
+    };
+    console.info('[Anytype Import] Resolve type key', debugEntry);
+    debugLog?.({
+      label: 'Resolve type key',
+      data: debugEntry,
+    });
+    return resolvedTypeKey;
+  }
+
+  const debugEntry = {
+    ...typeKeyDebug,
+    source: 'not_found',
+    matchedType: matchedType ?? null,
+    resolvedTypeKey: '',
+  };
+  console.info('[Anytype Import] Resolve type key', debugEntry);
+  debugLog?.({
+    label: 'Resolve type key',
+    data: debugEntry,
+  });
+  return '';
 }
 
 function extractObjects(data: unknown): AnytypeObjectSummary[] {

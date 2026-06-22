@@ -92,6 +92,12 @@ export function normalizeType(value: unknown): AnytypeType | null {
       ? candidate.key
       : typeof candidate.type_key === 'string'
         ? candidate.type_key
+        : typeof candidate.typeKey === 'string'
+          ? candidate.typeKey
+          : typeof candidate.unique_key === 'string'
+            ? candidate.unique_key
+            : typeof candidate.uniqueKey === 'string'
+              ? candidate.uniqueKey
         : '';
   const name =
     typeof candidate.name === 'string'
@@ -108,7 +114,7 @@ export function normalizeType(value: unknown): AnytypeType | null {
 
   return {
     id,
-    key: key || id,
+    key,
     name: name || key || 'Untitled Type',
   };
 }
@@ -198,7 +204,13 @@ export function normalizeProperty(value: unknown): AnytypeProperty | null {
       ? candidate.key
       : typeof candidate.property_key === 'string'
         ? candidate.property_key
-        : '';
+        : typeof candidate.propertyKey === 'string'
+          ? candidate.propertyKey
+          : typeof candidate.relation_key === 'string'
+            ? candidate.relation_key
+            : typeof candidate.relationKey === 'string'
+              ? candidate.relationKey
+              : '';
   const name =
     typeof candidate.name === 'string'
       ? candidate.name
@@ -214,13 +226,13 @@ export function normalizeProperty(value: unknown): AnytypeProperty | null {
           ? candidate.property_format
           : '';
 
-  if (!id && !key && !(name && format)) {
+  if (!key) {
     return null;
   }
 
   return {
-    id: id || key || name,
-    key: key || id || name,
+    id: id || key,
+    key,
     name: name || key || id || 'Untitled Property',
     format: format || 'text',
   };
@@ -310,11 +322,13 @@ export function collectPropertyKeys(value: unknown): string[] {
         ? candidate.key
         : typeof candidate.property_key === 'string'
           ? candidate.property_key
-          : typeof candidate.relation_key === 'string'
-            ? candidate.relation_key
-            : typeof candidate.id === 'string'
-              ? candidate.id
-              : '';
+          : typeof candidate.propertyKey === 'string'
+            ? candidate.propertyKey
+            : typeof candidate.relation_key === 'string'
+              ? candidate.relation_key
+              : typeof candidate.relationKey === 'string'
+                ? candidate.relationKey
+                : '';
 
     return key ? [key] : [];
   });

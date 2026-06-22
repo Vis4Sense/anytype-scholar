@@ -53,6 +53,11 @@ export type AnytypeObjectPropertyValue = {
   url?: string;
 };
 
+export type AnytypeImportDebugEntry = {
+  label: string;
+  data: unknown;
+};
+
 export type ParsedBibEntry = {
   citationKey?: string;
   entryType?: string;
@@ -82,6 +87,7 @@ export type AnytypeImportResult = {
   failedCount: number;
   results: AnytypeImportItemResult[];
   warning?: string;
+  debug?: AnytypeImportDebugEntry[];
 };
 
 export type AnytypeConnectionCheckResult = {
@@ -117,7 +123,7 @@ export const DEFAULT_CONNECTION_SETTINGS: AnytypeConnectionSettings = {
   targetSpaceId: '',
   targetTypeId: '',
   targetTemplateId: '',
-  targetPropertyOverrides: [{ propertyName: 'Resource Type', value: 'paper' }],
+  targetPropertyOverrides: [{ propertyName: 'Resource Type', value: '["paper"]' }],
   targetTypeMode: 'new-paper',
 };
 
