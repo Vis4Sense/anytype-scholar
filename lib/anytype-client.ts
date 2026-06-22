@@ -461,6 +461,88 @@ export async function createProperty(
   };
 }
 
+export async function createCustomProperty(
+  settings: AnytypeConnectionSettings,
+  property: {
+    name: string;
+    key?: string;
+    format?: string;
+  },
+): Promise<{
+  ok: boolean;
+  message: string;
+  property?: AnytypeProperty;
+  status?: number;
+  statusText?: string;
+}> {
+  const trimmedName = property.name.trim();
+  const trimmedKey = property.key?.trim();
+  const format = property.format?.trim() || 'text';
+
+  if (!trimmedName) {
+    return {
+      ok: false,
+      message: 'Property name is required.',
+    };
+  }
+
+  const attempts = [
+    {
+      name: trimmedName,
+      key: trimmedKey || normalizePropertyKey(trimmedName),
+      format,
+    },
+    {
+      name: trimmedName,
+      format,
+    },
+    {
+      name: trimmedName,
+      type: format,
+    },
+  ];
+  let lastResponse: Response | null = null;
+  let lastData: unknown = null;
+
+  for (const body of attempts) {
+    const response = await fetch(
+      `${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/properties`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${settings.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    const data = await safeJson(response);
+    const createdProperty = normalizeProperty(
+      (data as { property?: unknown } | null)?.property ??
+        (data as { data?: unknown } | null)?.data ??
+        data,
+    );
+
+    if (response.ok && createdProperty) {
+      return {
+        ok: true,
+        property: createdProperty,
+        message: 'Property created.',
+      };
+    }
+
+    lastResponse = response;
+    lastData = data;
+  }
+
+  return {
+    ok: false,
+    status: lastResponse?.status,
+    statusText: lastResponse?.statusText,
+    message: extractApiErrorMessage(lastData) || `Failed to create ${trimmedName}.`,
+  };
+}
+
 export async function updateTypeProperties(
   settings: AnytypeConnectionSettings,
   typeId: string,
@@ -671,7 +753,6 @@ export async function createObject(
         },
       );
       const data = await safeJson(response);
-
       if (response.ok) {
         const createdObject = normalizeObject(
           (data as { object?: unknown } | null)?.object ??
@@ -839,90 +920,6 @@ async function resolveTargetTypeKey(settings: AnytypeConnectionSettings) {
   return (
     typesResult.types?.find((type) => type.id === settings.targetTypeId)?.key ?? ''
   );
-}
-
-async function updateObject(
-  settings: AnytypeConnectionSettings,
-  objectId: string,
-  input: {
-    name: string;
-    properties: AnytypeObjectPropertyValue[];
-    bodyMarkdown?: string;
-  },
-) {
-  const attempts = [
-    {
-      name: input.name,
-      properties: input.properties,
-      markdown: input.bodyMarkdown,
-    },
-    {
-      name: input.name,
-      properties: input.properties,
-      body: input.bodyMarkdown,
-    },
-    {
-      name: input.name,
-      properties: input.properties,
-      body_markdown: input.bodyMarkdown,
-    },
-    {
-      name: input.name,
-      properties: input.properties,
-      bodyMarkdown: input.bodyMarkdown,
-    },
-    {
-      details: input.properties,
-      body: input.bodyMarkdown,
-    },
-    {
-      details: input.properties,
-      body_markdown: input.bodyMarkdown,
-    },
-    {
-      details: input.properties,
-      bodyMarkdown: input.bodyMarkdown,
-    },
-    {
-      body: input.bodyMarkdown,
-    },
-    {
-      body_markdown: input.bodyMarkdown,
-    },
-    {
-      bodyMarkdown: input.bodyMarkdown,
-    },
-    {
-      markdown: input.bodyMarkdown,
-    },
-  ];
-
-  for (const body of attempts) {
-    try {
-      const response = await fetch(`${settings.baseUrl}/v1/spaces/${settings.targetSpaceId}/objects/${objectId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${settings.apiToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (response.ok) {
-        return;
-      }
-    } catch {
-      return;
-    }
-  }
-}
-
-function trimBody(value: string) {
-  return value.replace(/\n{3,}/g, '\n\n').trim();
-}
-
-function normalizeBodyForCompare(value: string | null | undefined) {
-  return typeof value === 'string' ? value.replace(/\r\n/g, '\n').trim() : '';
 }
 
 function extractObjects(data: unknown): AnytypeObjectSummary[] {

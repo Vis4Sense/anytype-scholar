@@ -38,9 +38,9 @@ const buttonClass =
 const inlineButtonClass =
   'rounded-lg border border-zinc-300 px-2.5 py-1.5 text-sm font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-70';
 const compactInlineButtonClass =
-  'rounded-lg border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-70';
+  'rounded-lg border border-zinc-300 px-2 py-0.5 text-xs font-medium text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-70';
 const compactSelectClass =
-  'w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-950 outline-none transition focus:border-zinc-950';
+  'w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-2 py-0.5 text-xs text-zinc-950 outline-none transition focus:border-zinc-950';
 
 function App() {
   const [settings, setSettings] = useState<AnytypeConnectionSettings>(
@@ -262,6 +262,9 @@ function App() {
       targetSpaceId: nextTargetSpaceId,
       targetTypeId: hasSavedSpace ? baseSettings.targetTypeId : '',
       targetTemplateId: hasSavedSpace ? baseSettings.targetTemplateId : '',
+      targetPropertyOverrides: hasSavedSpace
+        ? baseSettings.targetPropertyOverrides
+        : DEFAULT_CONNECTION_SETTINGS.targetPropertyOverrides,
     };
     await saveConnectionSettings(nextSettings);
     return nextSettings;
@@ -273,6 +276,7 @@ function App() {
       targetSpaceId,
       targetTypeId: '',
       targetTemplateId: '',
+      targetPropertyOverrides: DEFAULT_CONNECTION_SETTINGS.targetPropertyOverrides,
     };
 
     setSettings(nextSettings);
@@ -290,6 +294,7 @@ function App() {
       ...settings,
       targetTypeId,
       targetTemplateId: '',
+      targetPropertyOverrides: settings.targetPropertyOverrides,
       targetTypeMode: 'existing' as const,
     };
 
@@ -306,6 +311,21 @@ function App() {
     const nextSettings = {
       ...settings,
       targetTemplateId,
+    };
+
+    setSettings(nextSettings);
+    setImportResult(null);
+    await saveConnectionSettings(nextSettings);
+  }
+
+  async function updateOverrides(
+    updater: (
+      overrides: AnytypeConnectionSettings['targetPropertyOverrides'],
+    ) => AnytypeConnectionSettings['targetPropertyOverrides'],
+  ) {
+    const nextSettings = {
+      ...settings,
+      targetPropertyOverrides: updater(settings.targetPropertyOverrides),
     };
 
     setSettings(nextSettings);
@@ -683,7 +703,7 @@ function App() {
             };
 
   return (
-    <main className="max-h-96 w-80 overflow-y-auto bg-white px-5 py-5 text-zinc-950">
+    <main className="max-h-96 w-80 overflow-y-auto bg-white px-5 py-4 text-zinc-950">
       <div className="flex items-center justify-between gap-2">
         <p className="m-0 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-zinc-500">
           Anytype Scholar
@@ -722,6 +742,7 @@ function App() {
 
           <TargetSetupPanel
             settings={settings}
+            properties={properties}
             spaces={spaces}
             types={types}
             templates={templates}
@@ -742,6 +763,34 @@ function App() {
             onTargetSpaceChange={(value) => void handleTargetSpaceChange(value)}
             onTargetTypeChange={(value) => void handleTargetTypeChange(value)}
             onTargetTemplateChange={(value) => void handleTargetTemplateChange(value)}
+            onAddOverride={() =>
+              void updateOverrides((overrides) => [
+                ...overrides,
+                { propertyName: '', value: '' },
+              ])
+            }
+            onRemoveOverride={(index) =>
+              void updateOverrides((overrides) => {
+                const nextOverrides = overrides.filter((_, itemIndex) => itemIndex !== index);
+                return nextOverrides.length > 0
+                  ? nextOverrides
+                  : DEFAULT_CONNECTION_SETTINGS.targetPropertyOverrides;
+              })
+            }
+            onOverridePropertyNameChange={(index, value) =>
+              void updateOverrides((overrides) =>
+                overrides.map((override, itemIndex) =>
+                  itemIndex === index ? { ...override, propertyName: value } : override,
+                ),
+              )
+            }
+            onOverrideValueChange={(index, value) =>
+              void updateOverrides((overrides) =>
+                overrides.map((override, itemIndex) =>
+                  itemIndex === index ? { ...override, value } : override,
+                ),
+              )
+            }
             onToggleCreateType={() => {
               setIsCreatingType((value) => !value);
               setNewTypeName('');
@@ -780,6 +829,7 @@ function normalizePropertyName(value: string) {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
 }
+
 
 function formatMessage(message: string, status?: number, statusText?: string) {
   if (typeof status !== 'number') {

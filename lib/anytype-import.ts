@@ -14,7 +14,12 @@ import {
   getEntryDisplayName,
   parseBibtexEntries,
 } from '@/lib/bibtex';
-import { createObject, listObjects, listProperties } from '@/lib/anytype-client';
+import {
+  createCustomProperty,
+  createObject,
+  listObjects,
+  listProperties,
+} from '@/lib/anytype-client';
 import {
   normalizePropertyKey,
   normalizePropertyName,
@@ -63,7 +68,8 @@ export async function importBibtex(
   const existingObjectKeys = new Set<string>();
   const existingObjectsResult = await listObjects(settings);
   const propertiesResult = await listProperties(settings);
-  const propertyMap = buildPropertyMap(propertiesResult.properties ?? []);
+  const availableProperties = propertiesResult.properties ?? [];
+  const propertyMap = buildPropertyMap(availableProperties);
 
   if (existingObjectsResult.ok) {
     for (const object of existingObjectsResult.objects ?? []) {
@@ -75,6 +81,31 @@ export async function importBibtex(
     warning = 'Imported without checking existing Anytype objects for duplicates.';
   } else if (!existingObjectsResult.ok) {
     warning = 'Imported without checking existing Anytype objects for duplicates.';
+  }
+
+  const overrideResult = await ensureOverrideProperties(settings, availableProperties);
+  if (!overrideResult.ok) {
+    return {
+      ok: false,
+      message: overrideResult.message,
+      parsedCount: parsedEntries.length,
+      importedCount: 0,
+      skippedCount: 0,
+      failedCount: parsedEntries.length,
+      results: parsedEntries.map((entry) => ({
+        name: getEntryDisplayName(entry),
+        status: 'failed' as const,
+        reason: overrideResult.message,
+      })),
+    };
+  }
+
+  const overridePropertyMap = buildOverridePropertyMap(
+    settings,
+    overrideResult.properties ?? availableProperties,
+  );
+  if (overridePropertyMap.warnings.length > 0) {
+    warning = [warning, ...overridePropertyMap.warnings].filter(Boolean).join(' ');
   }
 
   for (const entry of uniqueEntries) {
@@ -93,7 +124,7 @@ export async function importBibtex(
 
     const createResult = await createObject(settings, {
       name: displayName,
-      properties: buildObjectProperties(entry, propertyMap),
+      properties: buildObjectProperties(entry, propertyMap, overridePropertyMap.overrides),
       bodyMarkdown: settings.targetTemplateId
         ? undefined
         : buildInitialBody(entry, displayName),
@@ -140,6 +171,7 @@ export async function importBibtex(
 function buildObjectProperties(
   entry: ParsedBibEntry,
   propertyMap: Record<string, { key: string; format: string }>,
+  overridePropertyMap: Array<{ key: string; format: string; value: string }>,
 ) {
   const properties: AnytypeObjectPropertyValue[] = [];
 
@@ -158,6 +190,8 @@ function buildObjectProperties(
   } else if (entry.year?.trim()) {
     assignProperty(properties, propertyMap, 'year', entry.year.trim());
   }
+
+  appendOverrideProperties(properties, overridePropertyMap);
 
   return properties;
 }
@@ -220,6 +254,162 @@ function buildInitialBody(entry: ParsedBibEntry, fallbackName: string) {
   }
 
   return `# ${title}`;
+}
+
+function appendOverrideProperties(
+  properties: AnytypeObjectPropertyValue[],
+  overridePropertyMap: Array<{ key: string; format: string; value: string }>,
+) {
+  for (const override of overridePropertyMap) {
+    const propertyKey = override.key.trim();
+    const propertyValue = override.value.trim();
+
+    if (!propertyKey || !propertyValue) {
+      continue;
+    }
+
+    const normalizedFormat = normalizePropertyName(override.format);
+
+    if (
+      normalizedFormat.includes('select') ||
+      normalizedFormat.includes('tag') ||
+      normalizedFormat.includes('status')
+    ) {
+      properties.push({
+        key: propertyKey,
+        multi_select: [propertyValue],
+      });
+      continue;
+    }
+
+    if (normalizedFormat === 'url') {
+      properties.push({
+        key: propertyKey,
+        url: propertyValue,
+      });
+      continue;
+    }
+
+    if (normalizedFormat === 'number') {
+      const numberValue = Number(propertyValue);
+      properties.push(
+        Number.isFinite(numberValue)
+          ? {
+              key: propertyKey,
+              number: numberValue,
+            }
+          : {
+              key: propertyKey,
+              text: propertyValue,
+            },
+      );
+      continue;
+    }
+
+    properties.push({
+      key: propertyKey,
+      text: propertyValue,
+    });
+  }
+}
+
+async function ensureOverrideProperties(
+  settings: AnytypeConnectionSettings,
+  availableProperties: AnytypeProperty[],
+) {
+  const nextProperties = [...availableProperties];
+
+  for (const override of settings.targetPropertyOverrides) {
+    const propertyName = override.propertyName.trim();
+    if (!propertyName) {
+      continue;
+    }
+
+    const existingProperty = nextProperties.find((property) =>
+      normalizePropertyName(property.key) === normalizePropertyName(propertyName) ||
+      normalizePropertyName(property.name) === normalizePropertyName(propertyName),
+    );
+
+    if (existingProperty) {
+      continue;
+    }
+
+    const createdProperty = await createCustomProperty(settings, {
+      name: propertyName,
+      format: 'text',
+    });
+
+    if (!createdProperty.ok || !createdProperty.property) {
+      return {
+        ok: false,
+        message: createdProperty.message,
+        properties: nextProperties,
+      };
+    }
+
+    nextProperties.push(createdProperty.property);
+  }
+
+  return {
+    ok: true,
+    message: 'Override properties ready.',
+    properties: nextProperties,
+  };
+}
+
+function buildOverridePropertyMap(
+  settings: AnytypeConnectionSettings,
+  properties: AnytypeProperty[],
+) {
+  const overrides: Array<{ key: string; format: string; value: string }> = [];
+  const warnings: string[] = [];
+
+  for (const override of settings.targetPropertyOverrides) {
+    const propertyName = override.propertyName.trim();
+    const value = override.value.trim();
+
+    if (!propertyName || !value) {
+      continue;
+    }
+
+    const property = properties.find(
+      (item) =>
+        normalizePropertyName(item.key) === normalizePropertyName(propertyName) ||
+        normalizePropertyName(item.name) === normalizePropertyName(propertyName),
+    );
+
+    if (!property?.key) {
+      continue;
+    }
+
+    const normalizedFormat = normalizePropertyName(property.format);
+    const supportsOverrideFormat =
+      normalizedFormat === '' ||
+      normalizedFormat === 'text' ||
+      normalizedFormat === 'number' ||
+      normalizedFormat === 'url' ||
+      normalizedFormat.includes('select') ||
+      normalizedFormat.includes('tag') ||
+      normalizedFormat.includes('status');
+
+    if (!supportsOverrideFormat) {
+      warnings.push(
+        `Skipped override "${property.name}" because ${property.format} properties are not supported yet.`,
+      );
+      continue;
+    }
+
+    overrides.push({
+      key: property.key,
+      format: property.format,
+      value,
+    });
+  }
+
+  return {
+    overrides,
+    warnings,
+  };
 }
 
 function buildPropertyMap(properties: AnytypeProperty[]) {

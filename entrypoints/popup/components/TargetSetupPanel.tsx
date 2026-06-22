@@ -1,6 +1,14 @@
+import { Icon } from '@iconify/react';
+import infoIcon from '@iconify-icons/lucide/info';
+import hashIcon from '@iconify-icons/lucide/hash';
+import linkIcon from '@iconify-icons/lucide/link';
+import plusIcon from '@iconify-icons/lucide/plus';
+import tagsIcon from '@iconify-icons/lucide/tags';
+import xIcon from '@iconify-icons/lucide/x';
 import type {
   AnytypeConnectionSettings,
   AnytypeProperty,
+  AnytypePropertyOverride,
   AnytypeSpace,
   AnytypeTemplate,
   AnytypeType,
@@ -18,6 +26,7 @@ type SchemaMapping = {
 
 type TargetSetupPanelProps = {
   settings: AnytypeConnectionSettings;
+  properties: AnytypeProperty[];
   spaces: AnytypeSpace[];
   types: AnytypeType[];
   templates: AnytypeTemplate[];
@@ -38,6 +47,10 @@ type TargetSetupPanelProps = {
   onTargetSpaceChange: (value: string) => void;
   onTargetTypeChange: (value: string) => void;
   onTargetTemplateChange: (value: string) => void;
+  onAddOverride: () => void;
+  onRemoveOverride: (index: number) => void;
+  onOverridePropertyNameChange: (index: number, value: string) => void;
+  onOverrideValueChange: (index: number, value: string) => void;
   onToggleCreateType: () => void;
   onNewTypeNameChange: (value: string) => void;
   onCreateType: () => void;
@@ -47,6 +60,7 @@ type TargetSetupPanelProps = {
 
 export function TargetSetupPanel({
   settings,
+  properties,
   spaces,
   types,
   templates,
@@ -67,6 +81,10 @@ export function TargetSetupPanel({
   onTargetSpaceChange,
   onTargetTypeChange,
   onTargetTemplateChange,
+  onAddOverride,
+  onRemoveOverride,
+  onOverridePropertyNameChange,
+  onOverrideValueChange,
   onToggleCreateType,
   onNewTypeNameChange,
   onCreateType,
@@ -75,7 +93,7 @@ export function TargetSetupPanel({
 }: TargetSetupPanelProps) {
   return (
     <>
-      <div className="mt-5 grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-x-2.5 gap-y-2">
+      <div className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-x-2.5 gap-y-2">
         <label className="contents">
           <span className="text-xs font-medium text-zinc-700">Target Space</span>
           <select
@@ -166,6 +184,37 @@ export function TargetSetupPanel({
         ) : null}
       </div>
 
+      {settings.targetSpaceId ? (
+        <div className="mt-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-zinc-700">Property Overrides</span>
+            <button
+              aria-label="Add property override"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 transition hover:text-zinc-950 disabled:cursor-wait disabled:opacity-70"
+              disabled={Boolean(busyLabel)}
+              type="button"
+              onClick={onAddOverride}>
+              <Icon icon={plusIcon} className="text-sm" aria-hidden="true" />
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {settings.targetPropertyOverrides.map((override, index) => (
+              <PropertyOverrideRow
+                key={`${index}-${override.propertyName}`}
+                override={override}
+                property={findMatchingProperty(properties, override.propertyName)}
+                onPropertyNameChange={(value) =>
+                  onOverridePropertyNameChange(index, value)
+                }
+                onRemove={() => onRemoveOverride(index)}
+                onValueChange={(value) => onOverrideValueChange(index, value)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {settings.targetSpaceId &&
       settings.targetTypeId &&
       missingTypePropertiesLength > 0 ? (
@@ -222,4 +271,107 @@ export function TargetSetupPanel({
       ) : null}
     </>
   );
+}
+
+type PropertyOverrideRowProps = {
+  override: AnytypePropertyOverride;
+  property?: AnytypeProperty;
+  onPropertyNameChange: (value: string) => void;
+  onRemove: () => void;
+  onValueChange: (value: string) => void;
+};
+
+function PropertyOverrideRow({
+  override,
+  property,
+  onPropertyNameChange,
+  onRemove,
+  onValueChange,
+}: PropertyOverrideRowProps) {
+  const formatMeta = getPropertyFormatMeta(property?.format);
+
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
+      <Icon
+        icon={formatMeta.icon}
+        className="shrink-0 text-xs text-zinc-500"
+        aria-hidden="true"
+      />
+      <input
+        className="min-w-0 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-950 outline-none transition focus:border-zinc-950"
+        placeholder="Resource Type"
+        type="text"
+        value={override.propertyName}
+        onChange={(event) => onPropertyNameChange(event.target.value)}
+      />
+      <input
+        className="min-w-0 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-950 outline-none transition focus:border-zinc-950"
+        placeholder="paper"
+        type="text"
+        value={override.value}
+        onChange={(event) => onValueChange(event.target.value)}
+      />
+      <button
+        className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 transition hover:text-zinc-950"
+        type="button"
+        onClick={onRemove}
+        aria-label="Remove property override">
+        <Icon icon={xIcon} className="text-sm" aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+function findMatchingProperty(properties: AnytypeProperty[], propertyName: string) {
+  const normalized = normalizePropertyName(propertyName);
+  return properties.find(
+    (property) =>
+      normalizePropertyName(property.key) === normalized ||
+      normalizePropertyName(property.name) === normalized,
+  );
+}
+
+function getPropertyFormatMeta(format?: string) {
+  const normalized = normalizePropertyName(format ?? '');
+
+  if (normalized === 'number') {
+    return {
+      icon: hashIcon,
+      label: 'number',
+    };
+  }
+
+  if (normalized === 'url') {
+    return {
+      icon: linkIcon,
+      label: 'url',
+    };
+  }
+
+  if (
+    normalized.includes('select') ||
+    normalized.includes('tag') ||
+    normalized.includes('status')
+  ) {
+    return {
+      icon: tagsIcon,
+      label: format || 'tag/select',
+    };
+  }
+
+  if (normalized === 'text') {
+    return {
+      icon: infoIcon,
+      label: 'text',
+    };
+  }
+
+  return {
+    icon: infoIcon,
+    label: format || 'unmatched',
+  };
+}
+
+function normalizePropertyName(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
 }

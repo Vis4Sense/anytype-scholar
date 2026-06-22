@@ -1,3 +1,8 @@
+export type AnytypePropertyOverride = {
+  propertyName: string;
+  value: string;
+};
+
 export type AnytypeConnectionSettings = {
   baseUrl: string;
   apiToken: string;
@@ -5,6 +10,7 @@ export type AnytypeConnectionSettings = {
   targetSpaceId: string;
   targetTypeId: string;
   targetTemplateId: string;
+  targetPropertyOverrides: AnytypePropertyOverride[];
   targetTypeMode: 'new-paper' | 'existing';
 };
 
@@ -41,6 +47,7 @@ export type AnytypeTypeDetail = AnytypeType & {
 
 export type AnytypeObjectPropertyValue = {
   key: string;
+  multi_select?: string[];
   text?: string;
   number?: number;
   url?: string;
@@ -110,6 +117,7 @@ export const DEFAULT_CONNECTION_SETTINGS: AnytypeConnectionSettings = {
   targetSpaceId: '',
   targetTypeId: '',
   targetTemplateId: '',
+  targetPropertyOverrides: [{ propertyName: 'Resource Type', value: 'paper' }],
   targetTypeMode: 'new-paper',
 };
 
@@ -136,6 +144,30 @@ export async function saveConnectionSettings(
 export function normalizeConnectionSettings(
   settings: AnytypeConnectionSettings,
 ): AnytypeConnectionSettings {
+  const legacySettings = settings as AnytypeConnectionSettings & {
+    targetOverridePropertyKey?: string;
+    targetOverrideValue?: string;
+  };
+  const legacyOverride =
+    legacySettings.targetOverridePropertyKey?.trim() &&
+    legacySettings.targetOverrideValue?.trim()
+      ? [
+          {
+            propertyName: legacySettings.targetOverridePropertyKey.trim(),
+            value: legacySettings.targetOverrideValue.trim(),
+          },
+        ]
+      : [];
+  const normalizedOverrides =
+    settings.targetPropertyOverrides?.length > 0
+      ? settings.targetPropertyOverrides
+          .map((override) => ({
+            propertyName: override.propertyName.trim(),
+            value: override.value.trim(),
+          }))
+          .filter((override) => override.propertyName || override.value)
+      : legacyOverride;
+
   return {
     baseUrl: settings.baseUrl.trim().replace(/\/+$/, ''),
     apiToken: settings.apiToken.trim(),
@@ -143,6 +175,10 @@ export function normalizeConnectionSettings(
     targetSpaceId: settings.targetSpaceId.trim(),
     targetTypeId: settings.targetTypeId.trim(),
     targetTemplateId: settings.targetTemplateId.trim(),
+    targetPropertyOverrides:
+      normalizedOverrides.length > 0
+        ? normalizedOverrides
+        : DEFAULT_CONNECTION_SETTINGS.targetPropertyOverrides,
     targetTypeMode:
       settings.targetTypeMode === 'existing' ? 'existing' : 'new-paper',
   };
@@ -161,6 +197,9 @@ function isConnectionSettings(value: unknown): value is AnytypeConnectionSetting
     typeof candidate.targetSpaceId === 'string' &&
     typeof candidate.targetTypeId === 'string' &&
     typeof candidate.targetTemplateId === 'string' &&
+    (Array.isArray(candidate.targetPropertyOverrides) ||
+      (typeof candidate.targetOverridePropertyKey === 'string' &&
+        typeof candidate.targetOverrideValue === 'string')) &&
     (candidate.targetTypeMode === 'new-paper' ||
       candidate.targetTypeMode === 'existing')
   );
