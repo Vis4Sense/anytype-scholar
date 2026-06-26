@@ -96,7 +96,7 @@ export function normalizeParsedEntry(entry: ParsedBibEntry): ParsedBibEntry {
     ...entry,
     citationKey: cleanFieldValue(entry.citationKey),
     title: cleanFieldValue(entry.title),
-    authors: entry.authors?.map((author) => cleanFieldValue(author)).filter(Boolean),
+    authors: entry.authors?.map((author) => normalizeAuthorName(author)).filter(Boolean),
     year: normalizeYear(entry.year),
     venue: cleanFieldValue(entry.venue),
     doi: normalizeDoi(entry.doi),
@@ -333,8 +333,26 @@ function splitAuthors(value?: string) {
 
   return normalized
     .split(/\s+and\s+/i)
-    .map((author) => cleanFieldValue(author))
+    .map((author) => normalizeAuthorName(author))
     .filter(Boolean);
+}
+
+function normalizeAuthorName(value?: string) {
+  const normalized = cleanFieldValue(value);
+
+  if (!normalized) {
+    return '';
+  }
+
+  const commaParts = normalized.split(',').map((part) => cleanFieldValue(part)).filter(Boolean);
+
+  // Only flip the common "Family, Given" form; more complex comma-separated
+  // BibTeX names are left untouched to avoid mangling suffixes or particles.
+  if (commaParts.length === 2) {
+    return `${commaParts[1]} ${commaParts[0]}`.trim();
+  }
+
+  return normalized;
 }
 
 function splitKeywords(value?: string) {
